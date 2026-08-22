@@ -1,9 +1,9 @@
-use std::io;
 use socket2::Socket;
+use std::io;
 
 #[cfg(not(any(target_os = "freebsd", target_os = "linux")))]
 pub fn set_congestion_control(_sock: &Socket, _algo: &str) -> io::Result<()> {
-    return Err(io::Error::new(io::ErrorKind::InvalidInput, "not implemented"));
+    Err(io::Error::new(io::ErrorKind::InvalidInput, "not implemented"))
 }
 
 #[cfg(target_os = "linux")]

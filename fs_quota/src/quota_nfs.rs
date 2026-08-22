@@ -1,8 +1,11 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 
+use log::debug;
+
 use crate::{FqError, FsQuota, Mtab};
 
+#[cfg(has_nfs_c)]
 extern "C" {
     fn fs_quota_nfs(
         host: *const c_char,
@@ -17,10 +20,35 @@ extern "C" {
     ) -> c_int;
 }
 
+#[cfg(not(has_nfs_c))]
+#[allow(clippy::too_many_arguments)]
+unsafe fn fs_quota_nfs(
+    _host: *const c_char,
+    _path: *const c_char,
+    _nfsvers: *const c_char,
+    _id: c_int,
+    _do_group: c_int,
+    _bytes_used: *mut u64,
+    _bytes_limit: *mut u64,
+    _files_used: *mut u64,
+    _files_limit: *mut u64,
+) -> c_int {
+    0x00000002 // NoQuota fallback
+}
+
+#[cfg(has_nfs_c)]
 mod ffi {
     use super::*;
     extern "C" {
         pub(crate) fn clnt_sperrno(e: c_int) -> *const c_char;
+    }
+}
+
+#[cfg(not(has_nfs_c))]
+mod ffi {
+    use super::*;
+    pub(crate) unsafe fn clnt_sperrno(_e: c_int) -> *const c_char {
+        c"NFS quota RPC unsupported".as_ptr() as *const c_char
     }
 }
 
@@ -83,10 +111,10 @@ pub(crate) fn get_quota(entry: &Mtab, uid: u32) -> Result<FsQuota, FqError> {
 
     let m = |v| if v == 0xffffffffffffffff { None } else { Some(v) };
     let res = FsQuota {
-        bytes_used:  bytes_used,
+        bytes_used,
         bytes_limit: m(bytes_limit),
-        files_used:  files_used,
+        files_used,
         files_limit: m(files_limit),
     };
-    return Ok(res);
+    Ok(res)
 }

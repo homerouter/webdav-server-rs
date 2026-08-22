@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/webdav-server/0.4.0")]
+#![doc(html_root_url = "https://docs.rs/webdav-server/0.4.1")]
 //! # `webdav-server` is a webdav server that handles user-accounts.
 //!
 //! This is a webdav server that allows access to a users home directory,
@@ -11,8 +11,7 @@
 //! for documentation on how to run the server.
 //!
 
-#[macro_use]
-extern crate log;
+use log::debug;
 
 mod auth;
 mod cache;
@@ -26,25 +25,23 @@ mod tls;
 mod unixuser;
 mod userfs;
 
-use std::convert::TryFrom;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::os::unix::io::{FromRawFd, AsRawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::process::exit;
 use std::sync::Arc;
 
-use clap::clap_app;
+use clap::Parser;
+use dav_server::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
+use dav_server::{fakels::FakeLs, fs::GuardedFileSystem, ls::DavLockSystem};
+use futures_util::stream::StreamExt;
 use headers::{authorization::Basic, Authorization, HeaderMapExt};
 use http::status::StatusCode;
-use hyper::{
-    self,
-    server::conn::{AddrIncoming, AddrStream},
-    service::{make_service_fn, service_fn},
-};
+use http_body_util::{combinators::UnsyncBoxBody, BodyExt, StreamBody};
+use hyper::body::Frame;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
 use tls_listener::TlsListener;
-use tokio_rustls::server::TlsStream;
-use webdav_handler::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
-use webdav_handler::{fakels::FakeLs, fs::DavFileSystem, ls::DavLockSystem};
 
 use crate::config::{AcctType, Auth, CaseInsensitive, Handler, Location, OnNotfound};
 use crate::rootfs::RootFs;
@@ -53,18 +50,38 @@ use crate::suid::proc_switch_ugid;
 use crate::tls::tls_acceptor;
 use crate::userfs::UserFs;
 
-static PROGNAME: &'static str = "webdav-server";
+static PROGNAME: &str = "webdav-server";
+
+#[derive(Parser, Debug)]
+#[command(name = "webdav-server", version)]
+struct Cli {
+    /// configuration file (/etc/webdav-server.toml)
+    #[arg(short = 'c', long = "config", default_value = "/etc/webdav-server.toml")]
+    config: String,
+
+    /// listen to this port on localhost only
+    #[arg(short = 'p', long = "port")]
+    port: Option<String>,
+
+    /// enable debug level logging
+    #[arg(short = 'D', long = "debug")]
+    debug: bool,
+
+    /// print configuration and exit
+    #[arg(short = 'P', long = "print_config")]
+    print_config: bool,
+}
 
 // Contains "state" and a handle to the config.
 #[derive(Clone)]
 struct Server {
-    dh:     DavHandler,
-    auth:   auth::Auth,
+    dh: DavHandler,
+    auth: auth::Auth,
     config: Arc<config::Config>,
 }
 
-type HttpResult = Result<hyper::Response<webdav_handler::body::Body>, io::Error>;
-type HttpRequest = http::Request<hyper::Body>;
+type HttpResult = Result<hyper::Response<UnsyncBoxBody<bytes::Bytes, io::Error>>, io::Error>;
+type HttpRequest = http::Request<hyper::body::Incoming>;
 
 // Server implementation.
 impl Server {
@@ -83,8 +100,7 @@ impl Server {
         location: &Location,
         auth_user: Option<&'a String>,
         user_param: Option<&'a str>,
-    ) -> Result<Option<Arc<unixuser::User>>, StatusCode>
-    {
+    ) -> Result<Option<Arc<unixuser::User>>, StatusCode> {
         // Get username - if any.
         let user = match auth_user.map(|u| u.as_str()).or(user_param) {
             Some(u) => u,
@@ -134,15 +150,17 @@ impl Server {
             .config
             .server
             .identification
-            .as_ref()
-            .map(|s| s.as_str())
+            .as_deref()
             .unwrap_or("webdav-server-rs");
-        if id != "" {
+        if !id.is_empty() {
             headers.insert("server", id.parse().unwrap());
         }
         if self.config.server.cors {
             headers.insert("Access-Control-Allow-Origin", "*".parse().unwrap());
-            headers.insert("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS,PROPFIND".parse().unwrap());
+            headers.insert(
+                "Access-Control-Allow-Methods",
+                "GET,HEAD,OPTIONS,PROPFIND".parse().unwrap(),
+            );
             headers.insert("Access-Control-Allow-Headers", "DNT,Depth,Range".parse().unwrap());
         }
     }
@@ -185,9 +203,7 @@ impl Server {
             }
 
             // handle request.
-            let res = self
-                .handle(req, method, path, route, location, remote_ip.clone())
-                .await?;
+            let res = self.handle(req, method, path, route, location, remote_ip).await?;
 
             // no on_notfound? then this is final.
             if reqdata.is_none() || res.status() != StatusCode::NOT_FOUND {
@@ -211,19 +227,16 @@ impl Server {
         route: MatchedRoute<'t, 'p, usize>,
         location: &'a Location,
         remote_ip: SocketAddr,
-    ) -> HttpResult
-    {
+    ) -> HttpResult {
         // See if we matched a :user parameter
         // If so, it must be valid UTF-8, or we return NOT_FOUND.
         let user_param = match route.params[0].as_ref() {
-            Some(p) => {
-                match p.as_str() {
-                    Some(p) => Some(p),
-                    None => {
-                        debug!("handle: invalid utf-8 in :user part of path");
-                        return self.error(StatusCode::NOT_FOUND).await;
-                    },
-                }
+            Some(p) => match p.as_str() {
+                Some(p) => Some(p),
+                None => {
+                    debug!("handle: invalid utf-8 in :user part of path");
+                    return self.error(StatusCode::NOT_FOUND).await;
+                },
             },
             None => None,
         };
@@ -242,7 +255,7 @@ impl Server {
                 Err(status) => return self.auth_error(status, location).await,
             };
             // if there was a :user in the route, return error if it does not match.
-            if user_param.map(|u| u != &user).unwrap_or(false) {
+            if user_param.map(|u| u != user).unwrap_or(false) {
                 debug!("handle: auth user and :user mismatch");
                 return self.auth_error(StatusCode::UNAUTHORIZED, location).await;
             }
@@ -268,9 +281,7 @@ impl Server {
         let prefix = match route.params[1].as_ref() {
             Some(p) => {
                 let mut start = p.start();
-                if start > 0 {
-                    start -= 1;
-                }
+                start = start.saturating_sub(1);
                 &path[..start]
             },
             None => path,
@@ -306,13 +317,15 @@ impl Server {
         } else {
             None
         };
+
+        // Create filesystem.
         let fs = match location.handler {
             Handler::Virtroot => {
                 let auth_user = auth_user.as_ref().map(String::to_owned);
-                RootFs::new(dir, auth_user, auth_ugid) as Box<dyn DavFileSystem>
+                RootFs::new(dir, auth_user, auth_ugid) as Box<dyn GuardedFileSystem<()>>
             },
             Handler::Filesystem => {
-                UserFs::new(dir, auth_ugid, true, case_insensitive, macos) as Box<dyn DavFileSystem>
+                UserFs::new(dir, auth_ugid, true, case_insensitive, macos) as Box<dyn GuardedFileSystem<()>>
             },
         };
 
@@ -320,7 +333,7 @@ impl Server {
         let methods = location
             .methods
             .unwrap_or(DavMethodSet::from_vec(vec!["GET", "HEAD"]).unwrap());
-        let hide_symlinks = location.hide_symlinks.clone().unwrap_or(true);
+        let hide_symlinks = location.hide_symlinks.unwrap_or(true);
 
         let mut config = DavConfig::new()
             .filesystem(fs)
@@ -331,8 +344,8 @@ impl Server {
         if let Some(auth_user) = auth_user {
             config = config.principal(auth_user);
         }
-        if let Some(indexfile) = location.indexfile.clone() {
-            config = config.indexfile(indexfile);
+        if let Some(ref indexfile) = location.indexfile {
+            config = config.indexfile(indexfile.clone());
         }
 
         // All set.
@@ -355,7 +368,9 @@ impl Server {
             let realm = realm.map(|s| s.as_str()).unwrap_or("Webdav Server");
             response = response.header("WWW-Authenticate", format!("Basic realm=\"{}\"", realm).as_str());
         }
-        Ok(response.body(msg.into()).unwrap())
+        let stream = futures_util::stream::once(async move { Ok(Frame::data(bytes::Bytes::from(msg))) });
+        let body = BodyExt::boxed_unsync(StreamBody::new(stream));
+        Ok(response.body(body).unwrap())
     }
 
     async fn auth_error(&self, code: StatusCode, location: &Location) -> HttpResult {
@@ -371,31 +386,25 @@ impl Server {
         let resp = self.dh.handle_with(config, req).await;
         let (mut parts, body) = resp.into_parts();
         self.set_headers(&mut parts.headers);
+        let body = BodyExt::boxed_unsync(body);
         Ok(http::Response::from_parts(parts, body))
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // command line option processing.
-    let matches = clap_app!(webdav_server =>
-        (version: "0.3")
-        (@arg CFG: -c --config +takes_value "configuration file (/etc/webdav-server.toml)")
-        (@arg PORT: -p --port +takes_value "listen to this port on localhost only")
-        (@arg DBG: -D --debug "enable debug level logging")
-        (@arg DMP: -P --print_config "print configuration and exit")
-    )
-    .get_matches();
+    let cli = Cli::parse();
 
-    if matches.is_present("DBG") {
+    if cli.debug {
         use env_logger::Env;
-        let level = "webdav_server=debug,webdav_handler=debug";
+        let level = "webdav_server=debug,dav_server=debug";
         env_logger::Builder::from_env(Env::default().default_filter_or(level)).init();
     } else {
         env_logger::init();
     }
 
-    let port = matches.value_of("PORT");
-    let cfg = matches.value_of("CFG").unwrap_or("/etc/webdav-server.toml");
+    let port = cli.port.as_deref();
+    let cfg = cli.config.as_str();
 
     // read config.
     let mut config = match config::read(cfg) {
@@ -407,7 +416,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     config::check(cfg, &config);
 
-    if matches.is_present("DMP") {
+    if cli.print_config {
         println!("{:#?}", config);
         exit(0);
     }
@@ -433,14 +442,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // resolve addresses.
-    let addrs = config.server.listen.clone().to_socket_addrs().unwrap_or_else(|e| {
-        eprintln!("{}: {}: [server] listen: {:?}", PROGNAME, cfg, e);
-        exit(1);
-    });
-    let tls_addrs = config.server.tls_listen.clone().to_socket_addrs().unwrap_or_else(|e| {
-        eprintln!("{}: {}: [server] listen: {:?}", PROGNAME, cfg, e);
-        exit(1);
-    });
+    let addrs = config
+        .server
+        .listen
+        .clone()
+        .to_socket_addrs()
+        .unwrap_or_else(|e| {
+            eprintln!("{}: {}: [server] listen: {:?}", PROGNAME, cfg, e);
+            exit(1);
+        });
+    let tls_addrs = config
+        .server
+        .tls_listen
+        .clone()
+        .to_socket_addrs()
+        .unwrap_or_else(|e| {
+            eprintln!("{}: {}: [server] listen: {:?}", PROGNAME, cfg, e);
+            exit(1);
+        });
 
     // initialize auth early.
     let auth = auth::Auth::new(config.clone())?;
@@ -462,30 +481,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let listener = match make_listener(&config.server, sockaddr) {
                 Ok(l) => l,
                 Err(e) => {
-                    eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
+                    eprintln!("{}: listener on {:?}: {}", PROGNAME, sockaddr, e);
                     exit(1);
                 },
             };
-            let dav_server = dav_server.clone();
-            let make_service = make_service_fn(move |socket: &AddrStream| {
-                let dav_server = dav_server.clone();
-                let remote_addr = socket.remote_addr();
-                async move {
-                    let func = move |req| {
-                        let dav_server = dav_server.clone();
-                        async move { dav_server.route(req, remote_addr).await }
-                    };
-                    Ok::<_, hyper::Error>(service_fn(func))
-                }
-            });
-            let incoming = AddrIncoming::from_listener(listener)?;
-            let server = hyper::Server::builder(incoming);
             println!("Listening on http://{:?}", sockaddr);
 
+            let dav_server = dav_server.clone();
             servers.push(async move {
-                if let Err(e) = server.serve(make_service).await {
-                    eprintln!("{}: server error: {}", PROGNAME, e);
-                    exit(1);
+                loop {
+                    let (stream, remote_addr) = match listener.accept().await {
+                        Ok(res) => res,
+                        Err(e) => {
+                            eprintln!("{}: accept error: {}", PROGNAME, e);
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            continue;
+                        },
+                    };
+                    let io = TokioIo::new(stream);
+                    let dav_server = dav_server.clone();
+                    tokio::spawn(async move {
+                        let service = hyper::service::service_fn(move |req| {
+                            let dav_server = dav_server.clone();
+                            async move { dav_server.route(req, remote_addr).await }
+                        });
+                        if let Err(err) = auto::Builder::new(TokioExecutor::new())
+                            .serve_connection(io, service)
+                            .await
+                        {
+                            debug!("{}: conn error: {}", PROGNAME, err);
+                        }
+                    });
                 }
             });
         }
@@ -497,21 +523,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for sockaddr in tls_addrs {
                 let tls_acceptor = tls_acceptor.clone();
                 let listener = make_listener(&config.server, sockaddr).unwrap_or_else(|e| {
-                    eprintln!("{}: listener on {:?}: {}", PROGNAME, &sockaddr, e);
+                    eprintln!("{}: listener on {:?}: {}", PROGNAME, sockaddr, e);
                     exit(1);
                 });
                 let dav_server = dav_server.clone();
-                let make_service = make_service_fn(move |stream: &TlsStream<AddrStream>| {
-                    let dav_server = dav_server.clone();
-                    let remote_addr = stream.get_ref().0.remote_addr();
-                    async move {
-                        let func = move |req| {
-                            let dav_server = dav_server.clone();
-                            async move { dav_server.route(req, remote_addr).await }
-                        };
-                        Ok::<_, hyper::Error>(service_fn(func))
-                    }
-                });
 
                 // Since the server can exit when there's an error on the TlsStream,
                 // we run it in a loop. Every time the loop is entered we dup() the
@@ -529,7 +544,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Err(e) => {
                                 eprintln!("{}: server error: dup: {}", PROGNAME, e);
                                 break;
-                            }
+                            },
                         };
                         // SAFETY: listen_fd is unique (we just dup'ed it).
                         let std_listen = unsafe { std::net::TcpListener::from_raw_fd(listen_fd) };
@@ -538,19 +553,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Err(e) => {
                                 eprintln!("{}: server error: new TcpListener: {}", PROGNAME, e);
                                 break;
-                            }
+                            },
                         };
-                        let a_incoming = match AddrIncoming::from_listener(listener) {
-                            Ok(a) => a,
-                            Err(e) => {
-                                eprintln!("{}: server error: new AddrIncoming: {}", PROGNAME, e);
-                                break;
+                        let mut tls_listener = TlsListener::new(tls_acceptor.clone(), listener);
+                        while let Some(res) = tls_listener.next().await {
+                            match res {
+                                Ok((stream, remote_addr)) => {
+                                    let io = TokioIo::new(stream);
+                                    let dav_server = dav_server.clone();
+                                    tokio::spawn(async move {
+                                        let service = hyper::service::service_fn(move |req| {
+                                            let dav_server = dav_server.clone();
+                                            async move { dav_server.route(req, remote_addr).await }
+                                        });
+                                        if let Err(err) = auto::Builder::new(TokioExecutor::new())
+                                            .serve_connection(io, service)
+                                            .await
+                                        {
+                                            debug!("{}: tls conn error: {}", PROGNAME, err);
+                                        }
+                                    });
+                                },
+                                Err(e) => {
+                                    debug!("{}: tls accept error: {}", PROGNAME, e);
+                                },
                             }
-                        };
-                        let incoming = TlsListener::new(tls_acceptor.clone(), a_incoming);
-                        let server = hyper::Server::builder(incoming);
-                        if let Err(e) = server.serve(make_service.clone()).await {
-                            eprintln!("{}: server error: {} (retrying)", PROGNAME, e);
                         }
                     }
                 });
@@ -558,19 +585,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // drop privs.
-        match (&config.server.uid, &config.server.gid) {
-            (&Some(uid), &Some(gid)) => {
-                if !suid::have_suid_privs() {
-                    eprintln!(
-                        "{}: insufficent priviliges to switch uid/gid (not root).",
-                        PROGNAME
-                    );
-                    exit(1);
-                }
-                let keep_privs = config.location.iter().any(|l| l.setuid);
-                proc_switch_ugid(uid, gid, keep_privs);
-            },
-            _ => {},
+        if let (&Some(uid), &Some(gid)) = (&config.server.uid, &config.server.gid) {
+            if !suid::have_suid_privs() {
+                eprintln!(
+                    "{}: insufficent priviliges to switch uid/gid (not root).",
+                    PROGNAME
+                );
+                exit(1);
+            }
+            let keep_privs = config.location.iter().any(|l| l.setuid);
+            proc_switch_ugid(uid, gid, keep_privs);
         }
 
         // spawn all servers, and wait for them to finish.
@@ -594,11 +618,12 @@ fn clone_httpreq(req: &HttpRequest) -> HttpRequest {
     let mut builder = http::Request::builder()
         .method(req.method().clone())
         .uri(req.uri().clone())
-        .version(req.version().clone());
+        .version(req.version());
     for (name, value) in req.headers().iter() {
         builder = builder.header(name, value);
     }
-    builder.body(hyper::Body::empty()).unwrap()
+    let empty_body = unsafe { std::mem::zeroed::<hyper::body::Incoming>() };
+    builder.body(empty_body).unwrap()
 }
 
 fn expand_directory(dir: &str, pwd: Option<&Arc<unixuser::User>>) -> Result<String, StatusCode> {
@@ -626,7 +651,7 @@ fn expand_directory(dir: &str, pwd: Option<&Arc<unixuser::User>>) -> Result<Stri
 // Make a new TcpListener, and if it's a V6 listener, set the
 // V6_V6ONLY socket option on it.
 fn make_listener(srv: &config::Server, addr: SocketAddr) -> io::Result<tokio::net::TcpListener> {
-    use socket2::{Domain, SockAddr, Socket, Type, Protocol};
+    use socket2::{Domain, Protocol, SockAddr, Socket, Type};
     let s = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
     if let Some(cong) = srv.congestion_control.as_ref() {
         tcp_cong::set_congestion_control(&s, cong).map_err(|e| {

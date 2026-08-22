@@ -3,25 +3,25 @@
 //!
 use std::default::Default;
 use std::fmt::Debug;
+use std::sync::OnceLock;
 
-use lazy_static::lazy_static;
+use dav_server::{DavMethod, DavMethodSet};
 use regex::bytes::{Match, Regex, RegexSet};
-use webdav_handler::{DavMethod, DavMethodSet};
 
 // internal representation of a route.
 #[derive(Debug)]
 struct Route<T: Debug> {
-    regex:   Regex,
+    regex: Regex,
     methods: Option<DavMethodSet>,
-    data:    T,
+    data: T,
 }
 
 /// A matched route.
 #[derive(Debug)]
 pub struct MatchedRoute<'t, 'p, T: Debug> {
     pub methods: Option<DavMethodSet>,
-    pub params:  Vec<Option<Param<'p>>>,
-    pub data:    &'t T,
+    pub params: Vec<Option<Param<'p>>>,
+    pub data: &'t T,
 }
 
 /// A parameter on a matched route.
@@ -90,8 +90,7 @@ impl<T: Debug> Builder<T> {
         route: impl AsRef<str>,
         methods: Option<DavMethodSet>,
         data: T,
-    ) -> Result<&mut Self, regex::Error>
-    {
+    ) -> Result<&mut Self, regex::Error> {
         let route = route.as_ref();
         // Might be a regexp
         if route.starts_with("^") {
@@ -107,16 +106,14 @@ impl<T: Debug> Builder<T> {
         // the entire string.
         let re_route = route
             .chars()
-            .map(|c| {
-                match c {
-                    '*' => '\u{e001}',
-                    '(' => '\u{e002}',
-                    ')' => '\u{e003}',
-                    '\u{e001}' => ' ',
-                    '\u{e002}' => ' ',
-                    '\u{e003}' => ' ',
-                    c => c,
-                }
+            .map(|c| match c {
+                '*' => '\u{e001}',
+                '(' => '\u{e002}',
+                ')' => '\u{e003}',
+                '\u{e001}' => ' ',
+                '\u{e002}' => ' ',
+                '\u{e003}' => ' ',
+                c => c,
             })
             .collect::<String>();
         let re_route = regex::escape(&re_route);
@@ -126,15 +123,17 @@ impl<T: Debug> Builder<T> {
         //    :ident -> (?P<ident>[^/]*)
         //    *ident -> (?P<ident>.*)
         //    (text) -> (?:text|)
-        lazy_static! {
-            static ref COLON: Regex = Regex::new(":([a-zA-Z0-9]+)").unwrap();
-            static ref SPLAT: Regex = Regex::new("\u{e001}([a-zA-Z0-9]+)").unwrap();
-            static ref MAYBE: Regex = Regex::new("\u{e002}([^\u{e002}]*)\u{e003}").unwrap();
-        };
+        static COLON: OnceLock<Regex> = OnceLock::new();
+        static SPLAT: OnceLock<Regex> = OnceLock::new();
+        static MAYBE: OnceLock<Regex> = OnceLock::new();
+        let colon_re = COLON.get_or_init(|| Regex::new(":([a-zA-Z0-9]+)").unwrap());
+        let splat_re = SPLAT.get_or_init(|| Regex::new("\u{e001}([a-zA-Z0-9]+)").unwrap());
+        let maybe_re = MAYBE.get_or_init(|| Regex::new("\u{e002}([^\u{e002}]*)\u{e003}").unwrap());
+
         let mut re_route = re_route.into_bytes();
-        re_route = COLON.replace_all(&re_route, &b"(?P<$1>[^/]*)"[..]).to_vec();
-        re_route = SPLAT.replace_all(&re_route, &b"(?P<$1>.*)"[..]).to_vec();
-        re_route = MAYBE.replace_all(&re_route, &b"($1)?"[..]).to_vec();
+        re_route = colon_re.replace_all(&re_route, &b"(?P<$1>[^/]*)"[..]).to_vec();
+        re_route = splat_re.replace_all(&re_route, &b"(?P<$1>.*)"[..]).to_vec();
+        re_route = maybe_re.replace_all(&re_route, &b"($1)?"[..]).to_vec();
 
         // finalize regex.
         let re_route = "^".to_string() + &String::from_utf8(re_route).unwrap() + "$";
@@ -156,7 +155,7 @@ impl<T: Debug> Builder<T> {
     pub fn build(&mut self) -> Router<T> {
         let set = RegexSet::new(self.routes.iter().map(|r| r.regex.as_str())).unwrap();
         Router {
-            routes: std::mem::replace(&mut self.routes, Vec::new()),
+            routes: std::mem::take(&mut self.routes),
             set,
         }
     }
@@ -165,14 +164,14 @@ impl<T: Debug> Builder<T> {
 /// Dead simple HTTP router.
 #[derive(Debug)]
 pub struct Router<T: Debug> {
-    set:    RegexSet,
+    set: RegexSet,
     routes: Vec<Route<T>>,
 }
 
 impl<T: Debug> Default for Router<T> {
     fn default() -> Router<T> {
         Router {
-            set:    RegexSet::new(&[] as &[&str]).unwrap(),
+            set: RegexSet::new(&[] as &[&str]).unwrap(),
             routes: Vec::new(),
         }
     }
@@ -192,8 +191,7 @@ impl<T: Debug> Router<T> {
         path: &'a [u8],
         method: DavMethod,
         param_names: &[&str],
-    ) -> Vec<MatchedRoute<'_, 'a, T>>
-    {
+    ) -> Vec<MatchedRoute<'_, 'a, T>> {
         let mut matched = Vec::new();
         for idx in self.set.matches(path) {
             let route = &self.routes[idx];
@@ -201,7 +199,7 @@ impl<T: Debug> Router<T> {
                 let mut params = Vec::new();
                 if let Some(caps) = route.regex.captures(path) {
                     for name in param_names {
-                        params.push(caps.name(name).map(|p| Param(p)));
+                        params.push(caps.name(name).map(Param));
                     }
                 } else {
                     for _ in param_names {
@@ -222,19 +220,19 @@ impl<T: Debug> Router<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use webdav_handler::DavMethod;
+    use dav_server::DavMethod;
 
     fn test_match(rtr: &Router<usize>, p: &[u8], user: &str, path: &str) {
         let x = rtr.matches(p, DavMethod::Get, &["user", "path"]);
-        assert!(x.len() > 0);
+        assert!(!x.is_empty());
         let x = &x[0];
-        if user != "" {
+        if !user.is_empty() {
             assert!(x.params[0]
                 .as_ref()
                 .map(|b| b.as_bytes() == user.as_bytes())
                 .unwrap_or(false));
         }
-        if path != "" {
+        if !path.is_empty() {
             assert!(x.params[1]
                 .as_ref()
                 .map(|b| b.as_bytes() == path.as_bytes())

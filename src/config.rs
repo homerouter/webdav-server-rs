@@ -4,47 +4,47 @@ use std::path::Path;
 use std::process::exit;
 use std::{fs, io};
 
+use dav_server::DavMethodSet;
 use serde::{Deserialize, Deserializer};
-use toml;
-use webdav_handler::DavMethodSet;
 
 use crate::router::Router;
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
-    pub server:   Server,
+    pub server: Server,
     #[serde(default)]
     pub accounts: Accounts,
     #[serde(default)]
-    pub pam:      Pam,
+    #[allow(dead_code)]
+    pub pam: Pam,
     #[serde(default)]
     pub htpasswd: HashMap<String, HtPasswd>,
     #[serde(default)]
-    pub unix:     Unix,
+    pub unix: Unix,
     #[serde(default)]
     pub location: Vec<Location>,
     #[serde(skip)]
-    pub router:   Router<usize>,
+    pub router: Router<usize>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Server {
     #[serde(default)]
-    pub listen:         OneOrManyAddr,
+    pub listen: OneOrManyAddr,
     #[serde(default)]
-    pub tls_listen:     OneOrManyAddr,
+    pub tls_listen: OneOrManyAddr,
     #[serde(default)]
-    pub tls_key:        Option<String>,
+    pub tls_key: Option<String>,
     #[serde(default)]
-    pub tls_cert:       Option<String>,
+    pub tls_cert: Option<String>,
     //#[serde(deserialize_with = "deserialize_user", default)]
-    pub uid:            Option<u32>,
+    pub uid: Option<u32>,
     //#[serde(deserialize_with = "deserialize_group", default)]
-    pub gid:            Option<u32>,
+    pub gid: Option<u32>,
     #[serde(default)]
     pub identification: Option<String>,
     #[serde(default)]
-    pub cors:             bool,
+    pub cors: bool,
     #[serde(default)]
     pub congestion_control: Option<String>,
 }
@@ -56,15 +56,16 @@ pub struct Accounts {
     #[serde(rename = "acct-type", default)]
     pub acct_type: Option<AcctType>,
     #[serde(default)]
-    pub realm:     Option<String>,
+    pub realm: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct Pam {
-    pub service:       String,
+    pub service: String,
     #[serde(rename = "cache-timeout")]
     pub cache_timeout: Option<usize>,
-    pub threads:       Option<usize>,
+    pub threads: Option<usize>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -77,35 +78,35 @@ pub struct Unix {
     #[serde(rename = "cache-timeout")]
     pub cache_timeout: Option<usize>,
     #[serde(rename = "min-uid", default)]
-    pub min_uid:       Option<u32>,
+    pub min_uid: Option<u32>,
     #[serde(rename = "supplementary-groups", default)]
-    pub aux_groups:    bool,
+    pub aux_groups: bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Location {
     #[serde(default)]
-    pub route:            Vec<String>,
+    pub route: Vec<String>,
     #[serde(deserialize_with = "deserialize_methodset", default)]
-    pub methods:          Option<DavMethodSet>,
-    #[serde( default)]
-    pub auth:             Option<Auth>,
+    pub methods: Option<DavMethodSet>,
+    #[serde(default)]
+    pub auth: Option<Auth>,
     #[serde(default, flatten)]
-    pub accounts:         Accounts,
-    pub handler:          Handler,
+    pub accounts: Accounts,
+    pub handler: Handler,
     #[serde(default)]
-    pub setuid:           bool,
-    pub directory:        String,
+    pub setuid: bool,
+    pub directory: String,
     #[serde(default, alias = "hide-symlinks")]
-    pub hide_symlinks:    Option<bool>,
+    pub hide_symlinks: Option<bool>,
     #[serde(default)]
-    pub indexfile:        Option<String>,
+    pub indexfile: Option<String>,
     #[serde(default)]
-    pub autoindex:        bool,
+    pub autoindex: bool,
     #[serde(rename = "case-insensitive", default)]
     pub case_insensitive: Option<CaseInsensitive>,
     #[serde(default)]
-    pub on_notfound:      Option<OnNotfound>,
+    pub on_notfound: Option<OnNotfound>,
 }
 
 #[derive(Deserialize, Debug, Clone, Copy)]
@@ -190,41 +191,45 @@ impl ToSocketAddrs for OneOrManyAddr {
 // usernames and groupnames.
 #[allow(unused)]
 pub fn deserialize_user<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     let s = String::deserialize(deserializer)?;
-    s.parse::<u32>()
-        .map(|v| Some(v))
-        .map_err(serde::de::Error::custom)
+    s.parse::<u32>().map(Some).map_err(serde::de::Error::custom)
 }
 
 #[allow(unused)]
 pub fn deserialize_group<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     let s = String::deserialize(deserializer)?;
-    s.parse::<u32>()
-        .map(|v| Some(v))
-        .map_err(serde::de::Error::custom)
+    s.parse::<u32>().map(Some).map_err(serde::de::Error::custom)
 }
 
 pub fn deserialize_methodset<'de, D>(deserializer: D) -> Result<Option<DavMethodSet>, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     let m = Vec::<String>::deserialize(deserializer)?;
     DavMethodSet::from_vec(m)
-        .map(|v| Some(v))
+        .map(Some)
         .map_err(serde::de::Error::custom)
 }
 
 pub fn deserialize_authtype<'de, D>(deserializer: D) -> Result<Option<AuthType>, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     let s = String::deserialize(deserializer)?;
-    if s.starts_with("htpasswd.") {
-        return Ok(Some(AuthType::HtPasswd(s[9..].to_string())));
+    if let Some(suffix) = s.strip_prefix("htpasswd.") {
+        return Ok(Some(AuthType::HtPasswd(suffix.to_string())));
     }
     #[cfg(feature = "pam")]
     if &s == "pam" {
         return Ok(Some(AuthType::Pam));
     }
-    if s == "" {
+    if s.is_empty() {
         return Ok(None);
     }
     Err(serde::de::Error::custom("unknown auth-type"))
@@ -247,7 +252,7 @@ pub fn build_routes(cfg: &str, config: &mut Config) -> io::Result<()> {
     let mut builder = Router::builder();
     for (idx, location) in config.location.iter().enumerate() {
         for r in &location.route {
-            if let Err(e) = builder.add(r, location.methods.clone(), idx) {
+            if let Err(e) = builder.add(r, location.methods, idx) {
                 let msg = format!("{}: [[location]][{}]: route {}: {}", cfg, idx, r, e);
                 return Err(io::Error::new(io::ErrorKind::InvalidData, msg));
             }
@@ -260,14 +265,17 @@ pub fn build_routes(cfg: &str, config: &mut Config) -> io::Result<()> {
 pub fn check(cfg: &str, config: &Config) {
     #[cfg(feature = "pam")]
     if let Some(AuthType::Pam) = config.accounts.auth_type {
-        if config.pam.service == "" {
+        if config.pam.service.is_empty() {
             eprintln!("{}: missing section [pam]", cfg);
             exit(1);
         }
     }
 
     if config.server.listen.is_empty() && config.server.tls_listen.is_empty() {
-        eprintln!("{}: [server]: at least one of listen or tls_listen must be set", cfg);
+        eprintln!(
+            "{}: [server]: at least one of listen or tls_listen must be set",
+            cfg
+        );
         exit(1);
     }
     if !config.server.tls_listen.is_empty() {

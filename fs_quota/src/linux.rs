@@ -53,9 +53,9 @@ pub(crate) fn get_quota(device: impl AsRef<Path>, uid: u32) -> Result<FsQuota, F
         0 => {
             let m = |v| if v == 0xffffffffffffffff { None } else { Some(v) };
             Ok(FsQuota {
-                bytes_used:  bytes_used,
+                bytes_used,
                 bytes_limit: m(bytes_limit),
-                files_used:  files_used,
+                files_used,
                 files_limit: m(files_limit),
             })
         },
@@ -72,7 +72,7 @@ pub(crate) fn read_mtab() -> io::Result<Vec<Mtab>> {
     for l in reader.lines() {
         let l2 = l?;
         let line = l2.trim();
-        if line.len() == 0 || line.starts_with("#") {
+        if line.is_empty() || line.starts_with('#') {
             continue;
         }
         let words = line.split_whitespace().collect::<Vec<_>>();
@@ -80,21 +80,19 @@ pub(crate) fn read_mtab() -> io::Result<Vec<Mtab>> {
             continue;
         }
         let (host, device) = if words[2].starts_with("nfs") {
-            if !words[0].contains(":") {
+            if let Some((host, path)) = words[0].split_once(':') {
+                (Some(host.to_string()), path)
+            } else {
                 continue;
             }
-            let mut s = words[0].splitn(2, ':');
-            let host = s.next().unwrap();
-            let path = s.next().unwrap();
-            (Some(host.to_string()), path)
         } else {
             (None, words[2])
         };
         result.push(Mtab {
-            host:      host,
-            device:    device.to_string(),
+            host,
+            device: device.to_string(),
             directory: words[1].to_string(),
-            fstype:    words[2].to_string(),
+            fstype: words[2].to_string(),
         });
     }
     Ok(result)

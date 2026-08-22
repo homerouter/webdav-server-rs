@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v0.4.1)'
+        required: false
+        default: 'v0.4.1'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    name: Build Debian Package (.deb)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine Version & Tag
+        id: versioning
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag_name }}" ]; then
+            TAG="${{ inputs.tag_name }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v0.4.1"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            debhelper \
+            dpkg-dev \
+            fakeroot \
+            libpam0g-dev \
+            libtirpc-dev \
+            rpcsvc-proto
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Debian package
+        run: |
+          dpkg-buildpackage -b -us -uc
+          mkdir -p dist
+          mv ../*.deb dist/ 2>/dev/null || true
+          ls -la dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: webdav-server-deb
+          path: dist/*.deb
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.versioning.outputs.tag }}
+          name: ${{ steps.versioning.outputs.tag }}
+          files: dist/*.deb
+          generate_release_notes: true

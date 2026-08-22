@@ -5,7 +5,7 @@ name = "webdav-server"
 # - Update html_root_url in src/main.rs
 # - Update CHANGELOG.md.
 # - Create git tag webdav-server-0.x.y
-version = "0.4.0"
+version = "0.4.1"
 
 description = "webdav/http server with support for user accounts"
 readme = "README.md"
@@ -13,11 +13,16 @@ documentation = "https://docs.rs/webdav-server"
 repository = "https://github.com/miquels/webdav-server-rs"
 homepage = "https://github.com/miquels/webdav-server-rs"
 authors = ["Miquel van Smoorenburg <mike@langeraar.net>"]
-edition = "2018"
+edition = "2021"
 license = "Apache-2.0"
 categories = ["filesystem"]
 
 [workspace]
+members = [
+    ".",
+    "fs_quota",
+    "pam",
+]
 
 [features]
 # By default, the "pam" and "quota" features are enabled.
@@ -46,31 +51,30 @@ opt-level = 3
 opt-level = 0
 
 [dependencies]
-clap = "2.33.3"
-env_logger = "0.8.3"
+bytes = "1"
+clap = { version = "4.5", features = ["derive", "env"] }
+dav-server = { version = "0.11", features = ["localfs"] }
+env_logger = "0.11"
 fs-quota = { path = "fs_quota", version = "0.1.0", optional = true }
-futures = "0.3.15"
-handlebars = "3.5.5"
-headers = "0.3.4"
-http = "0.2.4"
-hyper = { version = "0.14.7", features = [ "http1", "http2", "server", "stream", "runtime" ] }
-lazy_static = "1.4.0"
-libc = "0.2.94"
-log = "0.4.14"
-nix = "0.21.0"
+futures = "0.3"
+futures-util = "0.3"
+headers = "0.4"
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1.5", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+libc = "0.2"
+log = "0.4"
+nix = { version = "0.29", features = ["process", "user", "fs", "signal"] }
 pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
-percent-encoding = "2.1.0"
-regex = "1.5.4"
-rustls-pemfile = "1.0.0"
-serde = { version = "1.0.125", features = ["derive"] }
-serde_json = "1.0.64"
-socket2 = { version = "0.5.5", features = ["all"] }
-time = "0.1.42"
-tls-listener = { version = "0.5.1", features = [ "hyper-h1", "hyper-h2", "rustls" ] }
-tokio = { version = "1.5.0", features = ["full"] }
-tokio-rustls = "0.23.4"
-toml = "0.5.8"
-url = "2.2.2"
-#webdav-handler = { path = "../webdav-handler-rs", version = "=0.2.0" }
-webdav-handler = "0.2.0"
+percent-encoding = "2.3"
 pwhash = "1.0.0"
+regex = "1.11"
+rustls-pemfile = "2.2"
+serde = { version = "1.0", features = ["derive"] }
+socket2 = { version = "0.5", features = ["all"] }
+tls-listener = { version = "0.10", features = ["rustls"] }
+tokio = { version = "1.40", features = ["full"] }
+tokio-rustls = "0.26"
+toml = "0.8"
+url = "2.5"

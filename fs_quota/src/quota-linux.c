@@ -25,7 +25,7 @@ int fs_quota_linux(char *path, int id, int do_group,
 		return -1;
 	}
 
-#if _LINUX_QUOTA_VERSION == 1
+#if defined(_LINUX_QUOTA_VERSION) && _LINUX_QUOTA_VERSION == 1
 	*bytes_value_r = dqblk.dqb_curblocks * 1024;
 #else
 	*bytes_value_r = dqblk.dqb_curspace;

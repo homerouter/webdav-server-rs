@@ -26,9 +26,6 @@
 //!     println!("{:#?}", FsQuota::check(&args[1], None));
 //! }
 //! ```
-#[macro_use]
-extern crate log;
-extern crate libc;
 
 use std::ffi::{CStr, CString, OsStr};
 use std::io;
@@ -74,11 +71,11 @@ fn fstype(tp: &str) -> FsType {
 #[derive(Debug)]
 pub struct FsQuota {
     /// number of bytes used.
-    pub bytes_used:  u64,
+    pub bytes_used: u64,
     /// maximum number of bytes (available - used).
     pub bytes_limit: Option<u64>,
     /// number of files (inodes) in use.
-    pub files_used:  u64,
+    pub files_used: u64,
     /// maximum number of files (available - used).
     pub files_limit: Option<u64>,
 }
@@ -127,9 +124,9 @@ impl FsQuota {
             return Err(FqError::IoError(io::Error::last_os_error()));
         }
         Ok(FsQuota {
-            bytes_used:  ((vfs.f_blocks - vfs.f_bfree) * vfs.f_frsize) as u64,
+            bytes_used: ((vfs.f_blocks - vfs.f_bfree) * vfs.f_frsize) as u64,
             bytes_limit: Some(((vfs.f_blocks - (vfs.f_bfree - vfs.f_bavail)) * vfs.f_frsize) as u64),
-            files_used:  (vfs.f_files - vfs.f_ffree) as u64,
+            files_used: (vfs.f_files - vfs.f_ffree) as u64,
             files_limit: Some((vfs.f_files - (vfs.f_ffree - vfs.f_favail)) as u64),
         })
     }
@@ -179,10 +176,10 @@ fn realpath<P: AsRef<Path>>(path: P) -> io::Result<PathBuf> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Mtab {
-    host:      Option<String>,
-    device:    String,
+    host: Option<String>,
+    device: String,
     directory: String,
-    fstype:    String,
+    fstype: String,
 }
 
 // find an entry in the mtab.
@@ -194,11 +191,9 @@ fn get_mtab_entry(path: impl AsRef<Path>) -> Result<Mtab, FqError> {
     let ents = read_mtab()?
         .into_iter()
         .filter(|e| fstype(&e.fstype) != FsType::Other)
-        .filter(|e| {
-            match std::fs::metadata(&e.directory) {
-                Ok(ref m) => m.dev() == meta.dev(),
-                Err(_) => false,
-            }
+        .filter(|e| match std::fs::metadata(&e.directory) {
+            Ok(ref m) => m.dev() == meta.dev(),
+            Err(_) => false,
         })
         .collect::<Vec<Mtab>>();
 
@@ -210,31 +205,25 @@ fn get_mtab_entry(path: impl AsRef<Path>) -> Result<Mtab, FqError> {
             // multiple matching entries.. happens on NFS.
 
             // get "realpath" of the path that was passed in.
-            let rp = match realpath(path) {
-                Ok(p) => p,
-                Err(e) => return Err(e.into()),
-            };
+            let rp = realpath(path)?;
 
             // realpath the remaining entries as well..
             let mut v = Vec::new();
             for mut e in ents.into_iter() {
-                match realpath(&e.directory) {
-                    Ok(p) => {
-                        let c = String::from_utf8_lossy(p.as_os_str().as_bytes());
-                        e.directory = c.to_string();
-                        v.push(e);
-                    },
-                    Err(_) => {},
+                if let Ok(p) = realpath(&e.directory) {
+                    let c = String::from_utf8_lossy(p.as_os_str().as_bytes());
+                    e.directory = c.to_string();
+                    v.push(e);
                 }
             }
-            if v.len() == 0 {
+            if v.is_empty() {
                 return Err(FqError::NoQuota);
             }
 
             // find longest match.
             v.sort_by_key(|e| e.directory.clone());
             v.reverse();
-            match v.iter().position(|ref x| rp.starts_with(&x.directory)) {
+            match v.iter().position(|x| rp.starts_with(&x.directory)) {
                 Some(p) => v[p].clone(),
                 None => {
                     return Err(FqError::NoQuota);
@@ -258,19 +247,19 @@ impl From<std::ffi::NulError> for FqError {
 }
 
 fn to_num(e: &FqError) -> u32 {
-    match e {
-        &FqError::PermissionDenied => 1,
-        &FqError::NoQuota => 2,
-        &FqError::IoError(_) => 3,
-        &FqError::Other => 4,
+    match *e {
+        FqError::PermissionDenied => 1,
+        FqError::NoQuota => 2,
+        FqError::IoError(_) => 3,
+        FqError::Other => 4,
     }
 }
 
 impl PartialEq for FqError {
     fn eq(&self, other: &Self) -> bool {
         match self {
-            &FqError::IoError(ref e) => {
-                if let &FqError::IoError(ref o) = other {
+            FqError::IoError(e) => {
+                if let FqError::IoError(o) = other {
                     e.kind() == o.kind()
                 } else {
                     false

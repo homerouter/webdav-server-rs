@@ -3,34 +3,32 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static THREAD_SWITCH_UGID_USED: AtomicBool = AtomicBool::new(false);
 
-#[cfg(all(target_os = "linux"))]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod setuid {
-    // On x86, the default SYS_setresuid is 16 bits. We need to
-    // import the 32-bit variant.
-    #[cfg(target_arch = "x86")]
+    // On 32-bit x86 and 32-bit ARM, we need the 32-bit variant syscalls.
+    #[cfg(any(target_arch = "x86", target_arch = "arm"))]
     mod uid32 {
         pub use libc::SYS_getgroups32 as SYS_getgroups;
         pub use libc::SYS_setgroups32 as SYS_setgroups;
         pub use libc::SYS_setresgid32 as SYS_setresgid;
         pub use libc::SYS_setresuid32 as SYS_setresuid;
     }
-    #[cfg(not(target_arch = "x86"))]
+    #[cfg(not(any(target_arch = "x86", target_arch = "arm")))]
     mod uid32 {
         pub use libc::{SYS_getgroups, SYS_setgroups, SYS_setresgid, SYS_setresuid};
     }
     use self::uid32::*;
     use std::cell::RefCell;
-    use std::convert::TryInto;
     use std::io;
     use std::sync::atomic::Ordering;
     const ID_NONE: libc::uid_t = 0xffffffff;
 
     // current credentials of this thread.
     struct UgidState {
-        ruid:   u32,
-        euid:   u32,
-        rgid:   u32,
-        egid:   u32,
+        ruid: u32,
+        euid: u32,
+        rgid: u32,
+        egid: u32,
         groups: Vec<u32>,
     }
 
@@ -38,10 +36,10 @@ mod setuid {
         fn new() -> UgidState {
             super::THREAD_SWITCH_UGID_USED.store(true, Ordering::Release);
             UgidState {
-                ruid:   unsafe { libc::getuid() } as u32,
-                euid:   unsafe { libc::geteuid() } as u32,
-                rgid:   unsafe { libc::getgid() } as u32,
-                egid:   unsafe { libc::getegid() } as u32,
+                ruid: unsafe { libc::getuid() } as u32,
+                euid: unsafe { libc::geteuid() } as u32,
+                rgid: unsafe { libc::getgid() } as u32,
+                egid: unsafe { libc::getegid() } as u32,
                 groups: getgroups().expect("UgidState::new"),
             }
         }
@@ -57,31 +55,30 @@ mod setuid {
             )
         };
         if size < 0 {
-            return Err(oserr(size, "getgroups(0, NULL)"));
+            return Err(oserr("getgroups(0, NULL)"));
         }
 
         // get groups.
-        let mut groups = Vec::<u32>::with_capacity(size as usize);
-        groups.resize(size as usize, 0);
+        let mut groups = vec![0; size as usize];
         let res = unsafe { libc::syscall(SYS_getgroups, size as libc::c_int, groups.as_mut_ptr() as *mut _) };
 
         // sanity check.
         if res != size {
             if res < 0 {
-                return Err(oserr(res, format!("getgroups({}, buffer)", size)));
+                return Err(oserr(format!("getgroups({}, buffer)", size)));
             }
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("getgroups({}, buffer): returned {}", size, res),
-            ));
+            return Err(io::Error::other(format!(
+                "getgroups({}, buffer): returned {}",
+                size, res
+            )));
         }
 
         Ok(groups)
     }
 
-    fn oserr(code: libc::c_long, msg: impl AsRef<str>) -> io::Error {
+    fn oserr(msg: impl AsRef<str>) -> io::Error {
         let msg = msg.as_ref();
-        let err = io::Error::from_raw_os_error(code.try_into().unwrap());
+        let err = io::Error::last_os_error();
         io::Error::new(err.kind(), format!("{}: {}", msg, err))
     }
 
@@ -89,7 +86,7 @@ mod setuid {
     fn seteuid(uid: u32) -> io::Result<()> {
         let res = unsafe { libc::syscall(SYS_setresuid, ID_NONE, uid, ID_NONE) };
         if res < 0 {
-            return Err(oserr(res, format!("seteuid({})", uid)));
+            return Err(oserr(format!("seteuid({})", uid)));
         }
         Ok(())
     }
@@ -98,7 +95,7 @@ mod setuid {
     fn setegid(gid: u32) -> io::Result<()> {
         let res = unsafe { libc::syscall(SYS_setresgid, ID_NONE, gid, ID_NONE) };
         if res < 0 {
-            return Err(oserr(res, format!("setegid({})", gid)));
+            return Err(oserr(format!("setegid({})", gid)));
         }
         Ok(())
     }
@@ -108,7 +105,7 @@ mod setuid {
         let size = gids.len() as libc::c_int;
         let res = unsafe { libc::syscall(SYS_setgroups, size, gids.as_ptr() as *const libc::gid_t) };
         if res < 0 {
-            return Err(oserr(res, format!("setgroups({}, {:?}", size, gids)));
+            return Err(oserr(format!("setgroups({}, {:?})", size, gids)));
         }
         Ok(())
     }
@@ -146,7 +143,7 @@ mod setuid {
                     if let Err(e) = setgroups(newgroups) {
                         panic!("{}", e);
                     }
-                    cur.groups.truncate(0);
+                    cur.groups.clear();
                     cur.groups.extend_from_slice(newgroups);
                 }
                 if newuid != cur.euid {
@@ -167,7 +164,7 @@ mod setuid {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 mod setuid {
     // Not implemented, as it looks like only Linux has support for
     // per-thread uid/gid switching.
@@ -191,8 +188,8 @@ use self::setuid::thread_switch_ugid;
 
 #[derive(Clone, Debug)]
 struct UgidCreds {
-    pub uid:    u32,
-    pub gid:    u32,
+    pub uid: u32,
+    pub gid: u32,
     pub groups: Vec<u32>,
 }
 
@@ -206,22 +203,19 @@ pub struct UgidSwitchGuard {
 
 impl UgidSwitch {
     pub fn new(creds: Option<(u32, u32, &[u32])>) -> UgidSwitch {
-        let target_creds = match creds {
-            Some((uid, gid, groups)) => {
-                Some(UgidCreds {
-                    uid,
-                    gid,
-                    groups: groups.into(),
-                })
-            },
-            None => None,
-        };
+        let target_creds = creds.map(|(uid, gid, groups)| UgidCreds {
+            uid,
+            gid,
+            groups: groups.into(),
+        });
         UgidSwitch { target_creds }
     }
 
     #[allow(dead_code)]
     pub fn run<F, R>(&self, func: F) -> R
-    where F: FnOnce() -> R {
+    where
+        F: FnOnce() -> R,
+    {
         let _guard = self.guard();
         func()
     }
@@ -229,7 +223,7 @@ impl UgidSwitch {
     pub fn guard(&self) -> UgidSwitchGuard {
         match &self.target_creds {
             &None => UgidSwitchGuard { base_creds: None },
-            &Some(ref creds) => {
+            Some(creds) => {
                 let (uid, gid, groups) = thread_switch_ugid(creds.uid, creds.gid, &creds.groups);
                 UgidSwitchGuard {
                     base_creds: Some(UgidCreds { uid, gid, groups }),

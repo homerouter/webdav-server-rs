@@ -2,16 +2,18 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use log::debug;
+
 use crate::config::{AuthType, Config, Location};
 
 use headers::{authorization::Basic, Authorization, HeaderMapExt};
 use http::status::StatusCode;
 
-type HttpRequest = http::Request<hyper::Body>;
+type HttpRequest = http::Request<hyper::body::Incoming>;
 
 #[derive(Clone)]
 pub struct Auth {
-    config:   Arc<Config>,
+    config: Arc<Config>,
     #[cfg(feature = "pam")]
     pam_auth: pam_sandboxed::PamAuth,
 }
@@ -25,7 +27,7 @@ impl Auth {
             if let Some(timeout) = config.pam.cache_timeout {
                 crate::cache::cached::set_pamcache_timeout(timeout);
             }
-            pam_sandboxed::PamAuth::new(config.pam.threads.clone())?
+            pam_sandboxed::PamAuth::new(config.pam.threads)?
         };
 
         Ok(Auth {
@@ -41,8 +43,7 @@ impl Auth {
         req: &'a HttpRequest,
         location: &Location,
         _remote_ip: SocketAddr,
-    ) -> Result<String, StatusCode>
-    {
+    ) -> Result<String, StatusCode> {
         // we must have a login/pass
         let basic = match req.headers().typed_get::<Authorization<Basic>>() {
             Some(Authorization(basic)) => basic,
@@ -60,7 +61,7 @@ impl Auth {
         match auth_type {
             #[cfg(feature = "pam")]
             Some(&AuthType::Pam) => self.auth_pam(req, user, pass, _remote_ip).await,
-            Some(&AuthType::HtPasswd(ref ht)) => self.auth_htpasswd(user, pass, ht.as_str()).await,
+            Some(AuthType::HtPasswd(ht)) => self.auth_htpasswd(user, pass, ht.as_str()).await,
             None => {
                 debug!("need authentication, but auth-type is not set");
                 Err(StatusCode::UNAUTHORIZED)
@@ -76,8 +77,7 @@ impl Auth {
         user: &'a str,
         pass: &'a str,
         remote_ip: SocketAddr,
-    ) -> Result<String, StatusCode>
-    {
+    ) -> Result<String, StatusCode> {
         // stringify the remote IP address.
         let ip = remote_ip.ip();
         let ip_string = if ip.is_loopback() {
@@ -94,7 +94,7 @@ impl Auth {
                 std::net::IpAddr::V6(ip) => ip.to_string(),
             })
         };
-        let ip_ref = ip_string.as_ref().map(|s| s.as_str());
+        let ip_ref = ip_string.as_deref();
 
         // authenticate.
         let service = self.config.pam.service.as_str();
@@ -117,34 +117,37 @@ impl Auth {
         user: &'a str,
         pass: &'a str,
         section: &'a str,
-    ) -> Result<String, StatusCode>
-    {
+    ) -> Result<String, StatusCode> {
         // Get the htpasswd.WHATEVER section from the config file.
         let file = match self.config.htpasswd.get(section) {
             Some(section) => section.htpasswd.as_str(),
             None => return Err(StatusCode::UNAUTHORIZED),
         };
 
-        // Read the file and split it into a bunch of lines.
-        tokio::task::block_in_place(move || {
-            let data = match std::fs::read_to_string(file) {
-                Ok(data) => data,
-                Err(e) => {
-                    debug!("{}: {}", file, e);
-                    return Err(StatusCode::UNAUTHORIZED);
-                },
-            };
+        // Read the file asynchronously.
+        let data = match tokio::fs::read_to_string(file).await {
+            Ok(data) => data,
+            Err(e) => {
+                debug!("{}: {}", file, e);
+                return Err(StatusCode::UNAUTHORIZED);
+            },
+        };
+
+        // Offload CPU-bound hash verification to spawn_blocking.
+        let user = user.to_string();
+        let pass = pass.to_string();
+        tokio::task::spawn_blocking(move || {
             let lines = data
                 .split('\n')
                 .map(|s| s.trim())
-                .filter(|s| !s.starts_with("#") && !s.is_empty());
+                .filter(|s| !s.starts_with('#') && !s.is_empty());
 
             // Check each line for a match.
             for line in lines {
                 let mut fields = line.split(':');
                 if let (Some(htuser), Some(htpass)) = (fields.next(), fields.next()) {
-                    if htuser == user && pwhash::unix::verify(pass, htpass) {
-                        return Ok(user.to_string());
+                    if htuser == user && pwhash::unix::verify(&pass, htpass) {
+                        return Ok(user);
                     }
                 }
             }
@@ -152,5 +155,17 @@ impl Auth {
             debug!("auth_htpasswd: authentication for {} failed", user);
             Err(StatusCode::UNAUTHORIZED)
         })
+        .await
+        .unwrap_or(Err(StatusCode::UNAUTHORIZED))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_htpasswd_hash() {
+        let hash = pwhash::sha512_crypt::hash("testpass123").unwrap();
+        println!("TEST_SHA512_HASH: {}", hash);
+        assert!(pwhash::unix::verify("testpass123", &hash));
     }
 }

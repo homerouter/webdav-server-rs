@@ -14,18 +14,24 @@ pub struct Cache<K, V> {
 
 struct Intern<K, V> {
     maxsize: usize,
-    maxage:  Duration,
-    map:     HashMap<K, Arc<V>>,
-    fifo:    VecDeque<(Instant, K)>,
+    maxage: Duration,
+    map: HashMap<K, Arc<V>>,
+    fifo: VecDeque<(Instant, K)>,
+}
+
+impl<K: Hash + Eq + Clone, V> Default for Cache<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<K: Hash + Eq + Clone, V> Cache<K, V> {
     pub fn new() -> Cache<K, V> {
         let i = Intern {
             maxsize: 0,
-            maxage:  Duration::new(0, 0),
-            map:     HashMap::new(),
-            fifo:    VecDeque::new(),
+            maxage: Duration::new(0, 0),
+            map: HashMap::new(),
+            fifo: VecDeque::new(),
         };
         Cache {
             intern: Mutex::new(i),
@@ -60,15 +66,15 @@ impl<K: Hash + Eq + Clone, V> Cache<K, V> {
             }
         }
         for x in n..m.fifo.len() {
-            let &(_, ref key) = m.fifo.get(x).unwrap();
-            m.map.remove(&key);
+            let (_, key) = m.fifo.get(x).unwrap();
+            m.map.remove(key);
         }
         m.fifo.truncate(n);
     }
 
     pub fn insert(&self, key: K, val: V) -> Arc<V> {
         let mut m = self.intern.lock().unwrap();
-        self.expire(&mut *m);
+        self.expire(&mut m);
         let av = Arc::new(val);
         let ac = av.clone();
         m.map.insert(key.clone(), av);
@@ -77,17 +83,14 @@ impl<K: Hash + Eq + Clone, V> Cache<K, V> {
     }
 
     // see https://doc.rust-lang.org/book/first-edition/borrow-and-asref.html
-    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<Arc<V>>
+    pub fn get<Q>(&self, key: &Q) -> Option<Arc<V>>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: ?Sized + Hash + Eq,
     {
         let mut m = self.intern.lock().unwrap();
-        self.expire(&mut *m);
-        if let Some(v) = m.map.get(key) {
-            return Some(v.clone());
-        }
-        None
+        self.expire(&mut m);
+        m.map.get(key).cloned()
     }
 }
 
@@ -96,46 +99,57 @@ pub(crate) mod cached {
     // Cached versions of Unix account lookup and Pam auth.
     //
     use std::io;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::Duration;
 
     use crate::cache;
     use crate::unixuser::{self, User};
-    use lazy_static::lazy_static;
 
     struct Timeouts {
-        pwcache:  Duration,
+        pwcache: Duration,
+        #[cfg(feature = "pam")]
         pamcache: Duration,
     }
 
-    lazy_static! {
-        static ref TIMEOUTS: Mutex<Timeouts> = Mutex::new(Timeouts {
-            pwcache:  Duration::new(120, 0),
-            pamcache: Duration::new(120, 0),
-        });
-        static ref PWCACHE: cache::Cache<String, unixuser::User> = new_pwcache();
-        static ref PAMCACHE: cache::Cache<u64, String> = new_pamcache();
+    static TIMEOUTS: OnceLock<Mutex<Timeouts>> = OnceLock::new();
+    static PWCACHE: OnceLock<cache::Cache<String, unixuser::User>> = OnceLock::new();
+    #[cfg(feature = "pam")]
+    static PAMCACHE: OnceLock<cache::Cache<u64, String>> = OnceLock::new();
+
+    fn get_timeouts() -> &'static Mutex<Timeouts> {
+        TIMEOUTS.get_or_init(|| {
+            Mutex::new(Timeouts {
+                pwcache: Duration::from_secs(120),
+                #[cfg(feature = "pam")]
+                pamcache: Duration::from_secs(120),
+            })
+        })
     }
 
-    fn new_pwcache() -> cache::Cache<String, unixuser::User> {
-        let timeouts = TIMEOUTS.lock().unwrap();
-        cache::Cache::new().maxage(timeouts.pwcache)
+    fn get_pwcache() -> &'static cache::Cache<String, unixuser::User> {
+        PWCACHE.get_or_init(|| {
+            let timeouts = get_timeouts().lock().unwrap();
+            cache::Cache::new().maxage(timeouts.pwcache)
+        })
     }
 
-    fn new_pamcache() -> cache::Cache<u64, String> {
-        let timeouts = TIMEOUTS.lock().unwrap();
-        cache::Cache::new().maxage(timeouts.pamcache)
+    #[cfg(feature = "pam")]
+    fn get_pamcache() -> &'static cache::Cache<u64, String> {
+        PAMCACHE.get_or_init(|| {
+            let timeouts = get_timeouts().lock().unwrap();
+            cache::Cache::new().maxage(timeouts.pamcache)
+        })
     }
 
     pub(crate) fn set_pwcache_timeout(secs: usize) {
-        let mut timeouts = TIMEOUTS.lock().unwrap();
-        timeouts.pwcache = Duration::new(secs as u64, 0);
+        let mut timeouts = get_timeouts().lock().unwrap();
+        timeouts.pwcache = Duration::from_secs(secs as u64);
     }
 
     #[cfg(feature = "pam")]
     pub(crate) fn set_pamcache_timeout(secs: usize) {
-        let mut timeouts = TIMEOUTS.lock().unwrap();
-        timeouts.pamcache = Duration::new(secs as u64, 0);
+        let mut timeouts = get_timeouts().lock().unwrap();
+        timeouts.pamcache = Duration::from_secs(secs as u64);
     }
 
     #[cfg(feature = "pam")]
@@ -145,8 +159,7 @@ pub(crate) mod cached {
         user: &'a str,
         pass: &'a str,
         remip: Option<&'a str>,
-    ) -> Result<(), pam_sandboxed::PamError>
-    {
+    ) -> Result<(), pam_sandboxed::PamError> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -157,29 +170,30 @@ pub(crate) mod cached {
         remip.as_ref().hash(&mut s);
         let key = s.finish();
 
-        if let Some(cache_user) = PAMCACHE.get(&key) {
+        if let Some(cache_user) = get_pamcache().get(&key) {
             if user == cache_user.as_str() {
                 return Ok(());
             }
         }
 
         let mut pam_auth = pam_auth;
-        match pam_auth.auth(&service, &user, &pass, remip).await {
+        match pam_auth.auth(service, user, pass, remip).await {
             Err(e) => Err(e),
             Ok(()) => {
-                PAMCACHE.insert(key, user.to_owned());
+                get_pamcache().insert(key, user.to_owned());
                 Ok(())
             },
         }
     }
 
     pub async fn unixuser(username: &str, with_groups: bool) -> Result<Arc<User>, io::Error> {
-        if let Some(pwd) = PWCACHE.get(username) {
+        let pwcache = get_pwcache();
+        if let Some(pwd) = pwcache.get(username) {
             return Ok(pwd);
         }
         match User::by_name_async(username, with_groups).await {
             Err(e) => Err(e),
-            Ok(pwd) => Ok(PWCACHE.insert(username.to_owned(), pwd)),
+            Ok(pwd) => Ok(pwcache.insert(username.to_owned(), pwd)),
         }
     }
 }

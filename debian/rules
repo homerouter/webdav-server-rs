@@ -5,11 +5,12 @@
 
 override_dh_auto_build:
 	@if ! command -v cargo >/dev/null; then \
-		echo "Rust is not installed ("cargo" command not found)" >&2; \
+		echo "Rust is not installed ('cargo' command not found)" >&2; \
 		exit 1; fi
 	cargo build --release
 
 override_dh_auto_clean:
+	cargo clean 2>/dev/null || true
 
 override_dh_installsystemd:
 

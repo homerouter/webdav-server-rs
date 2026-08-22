@@ -17,22 +17,25 @@ use tokio::net::unix::ReadHalf as UnixReadHalf;
 use tokio::net::unix::WriteHalf as UnixWriteHalf;
 use tokio::net::UnixStream;
 
+use log::{debug, error};
+use serde::{Deserialize, Serialize};
+
 use crate::pam::{PamError, ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER};
 use crate::pamserver::{PamResponse, PamServer};
 
 // Request to be sent to the server process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PamRequest {
-    pub id:      u64,
-    pub user:    String,
-    pub pass:    String,
+    pub id: u64,
+    pub user: String,
+    pub pass: String,
     pub service: String,
-    pub remip:   Option<String>,
+    pub remip: Option<String>,
 }
 
 // sent over request channel to PamAuthTask.
 struct PamRequest1 {
-    req:       PamRequest,
+    req: PamRequest,
     resp_chan: oneshot::Sender<Result<(), PamError>>,
 }
 
@@ -43,9 +46,9 @@ pub struct PamAuth {
 }
 
 struct PamAuthInner {
-    once:       Once,
+    once: Once,
     serversock: RefCell<Option<StdUnixStream>>,
-    req_chan:   RefCell<Option<mpsc::Sender<PamRequest1>>>,
+    req_chan: RefCell<Option<mpsc::Sender<PamRequest1>>>,
 }
 
 // Mutation of PamAuthInner only happens once,
@@ -64,7 +67,7 @@ impl PamAuth {
     /// ```no_run
     /// use pam_sandboxed::PamAuth;
     ///
-    /// fn main() -> Result<(), Box<std::error::Error>> {
+    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
     ///     // get pam authentication handle.
     ///     let mut pam = PamAuth::new(None)?;
     ///
@@ -83,8 +86,8 @@ impl PamAuth {
         let serversock = PamServer::start(num_threads)?;
 
         let inner = PamAuthInner {
-            once:       Once::new(),
-            req_chan:   RefCell::new(None),
+            once: Once::new(),
+            req_chan: RefCell::new(None),
             serversock: RefCell::new(Some(serversock)),
         };
         Ok(PamAuth {
@@ -104,8 +107,7 @@ impl PamAuth {
         username: &str,
         password: &str,
         remoteip: Option<&str>,
-    ) -> Result<(), PamError>
-    {
+    ) -> Result<(), PamError> {
         // If we haven't started the background task yet, do it now.
         // That also initializes req_chan.
         let inner = &self.inner;
@@ -119,21 +121,18 @@ impl PamAuth {
 
         // create request to be sent to the server.
         let req = PamRequest {
-            id:      0,
-            user:    username.to_string(),
-            pass:    password.to_string(),
+            id: 0,
+            user: username.to_string(),
+            pass: password.to_string(),
             service: service.to_string(),
-            remip:   remoteip.map(|s| s.to_string()),
+            remip: remoteip.map(|s| s.to_string()),
         };
 
         // add a one-shot channel for the response.
         let (tx, rx) = oneshot::channel::<Result<(), PamError>>();
 
         // put it all together and send it.
-        let req1 = PamRequest1 {
-            req:       req,
-            resp_chan: tx,
-        };
+        let req1 = PamRequest1 { req, resp_chan: tx };
         let mut authtask_chan = inner.req_chan.borrow().as_ref().unwrap().clone();
         authtask_chan
             .send(req1)
@@ -230,16 +229,15 @@ impl PamAuthTask {
         loop {
             // read size header.
             let mut buf = [0u8; 2];
-            if let Err(_) = srx.read_exact(&mut buf).await {
+            if srx.read_exact(&mut buf).await.is_err() {
                 error!("PamClient: FATAL: short read, server gone away?!");
                 return;
             }
             let sz = ((buf[0] as usize) << 8) + (buf[1] as usize);
 
             // read response data.
-            let mut data = Vec::with_capacity(sz);
-            data.resize(sz, 0u8);
-            if let Err(_) = srx.read_exact(&mut data[..]).await {
+            let mut data = vec![0; sz];
+            if srx.read_exact(&mut data[..]).await.is_err() {
                 error!("PamClient: FATAL: short read, server gone away?!");
                 return;
             }

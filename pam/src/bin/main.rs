@@ -1,6 +1,5 @@
 use std::io::{self, Write};
 
-use env_logger;
 use pam_sandboxed::PamAuth;
 
 fn prompt(s: &str) -> io::Result<String> {
@@ -37,7 +36,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use pam_sandboxed::{test_mode, PamAuth, PamError};
-    use tokio;
 
     const TEST_STR: &str = "xyzzy-test-test";
 
@@ -46,7 +44,7 @@ mod tests {
         test_mode(true);
 
         let mut pam = PamAuth::new(None).unwrap();
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
 
         let res = rt.block_on(async {
             let mut pam2 = pam.clone();
@@ -71,7 +69,7 @@ mod tests {
         test_mode(true);
 
         let pam = PamAuth::new(None).unwrap();
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
 
         let mut handles = Vec::new();
         rt.block_on(async move {

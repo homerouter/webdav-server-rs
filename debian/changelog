@@ -1,3 +1,11 @@
+webdav-server-rs (0.4.1-1) unstable; urgency=medium
+
+  * Update to 0.4.1 release.
+  * Upgrade to hyper 1.5, tokio 1.40, dav-server 0.11.
+  * Add Alpine Linux musl compatibility.
+
+ -- Ruaue <ruaue@users.noreply.github.com>  Sat, 22 Aug 2026 01:28:00 +0000
+
 webdav-server-rs (0.4) unreleased; urgency=low
 
   * update to 0.4 release.

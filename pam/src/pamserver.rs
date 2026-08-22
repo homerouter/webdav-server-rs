@@ -9,7 +9,9 @@ use std::os::unix::net::UnixStream as StdUnixStream;
 use std::sync::{Arc, Mutex};
 
 use bincode::{deserialize, serialize};
-use libc;
+
+use log::{debug, trace};
+use serde::{Deserialize, Serialize};
 
 use crate::pam::{pam_auth, pam_lower_rlimits, PamError};
 use crate::pamclient::PamRequest;
@@ -17,7 +19,7 @@ use crate::pamclient::PamRequest;
 // Response back from the server process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PamResponse {
-    pub id:     u64,
+    pub id: u64,
     pub result: Result<(), PamError>,
 }
 
@@ -34,34 +36,33 @@ impl PamServer {
         let (sock1, sock2) = StdUnixStream::pair()?;
         let sock3 = sock2.try_clone()?;
 
-        let handle = std::thread::spawn(move || {
-            // fork server.
-            let pid = unsafe { libc::fork() };
-            if pid < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            if pid == 0 {
-                // first, close all filedescriptors (well, all..)
-                for fdno in 3..8192 {
-                    if fdno != sock2.as_raw_fd() && fdno != sock3.as_raw_fd() {
-                        unsafe {
-                            libc::close(fdno);
-                        }
+        // fork server.
+        let pid = unsafe { libc::fork() };
+        if pid < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if pid == 0 {
+            drop(sock1);
+            // first, close all filedescriptors (well, all..)
+            for fdno in 3..8192 {
+                if fdno != sock2.as_raw_fd() && fdno != sock3.as_raw_fd() {
+                    unsafe {
+                        libc::close(fdno);
                     }
                 }
-                let mut server = PamServer {
-                    rx_socket: sock2,
-                    tx_socket: Arc::new(Mutex::new(sock3)),
-                };
-                pam_lower_rlimits();
-                trace!("PamServer: child: starting server");
-                server.serve(num_threads.unwrap_or(8));
-                drop(server);
-                std::process::exit(0);
             }
-            Ok(())
-        });
-        handle.join().unwrap()?;
+            let mut server = PamServer {
+                rx_socket: sock2,
+                tx_socket: Arc::new(Mutex::new(sock3)),
+            };
+            pam_lower_rlimits();
+            trace!("PamServer: child: starting server");
+            server.serve(num_threads.unwrap_or(8));
+            drop(server);
+            std::process::exit(0);
+        }
+        drop(sock2);
+        drop(sock3);
 
         trace!("PamServer: parent: started server");
         Ok(sock1)
@@ -93,8 +94,7 @@ impl PamServer {
             }
 
             // read request data.
-            let mut data = Vec::with_capacity(sz);
-            data.resize(sz, 0u8);
+            let mut data = vec![0; sz];
             let res = self.rx_socket.read_exact(&mut data);
             if let Err(e) = res {
                 panic!("PamServer::serve: read socket: {}", e);
@@ -128,7 +128,7 @@ impl PamServer {
                     );
                 }
                 i += 1;
-                i = i % 400;
+                i %= 400;
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
         }
@@ -144,16 +144,16 @@ fn pam_process(req: PamRequest, sock: Arc<Mutex<StdUnixStream>>) -> Result<(), i
     trace!("PamServer::pam_process: starting with request {:?}", req);
 
     // authenticate.
-    let remip = req.remip.as_ref().map(|s| s.as_str()).unwrap_or("");
+    let remip = req.remip.as_deref().unwrap_or("");
     let res = PamResponse {
-        id:     req.id,
+        id: req.id,
         result: pam_auth(&req.service, &req.user, &req.pass, remip),
     };
 
     // and send back result.
     trace!("PamServer::pam_process: returning response {:?}", res);
-    let mut response: Vec<u8> = serialize(&res)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("error serializing response: {}", e)))?;
+    let mut response: Vec<u8> =
+        serialize(&res).map_err(|e| io::Error::other(format!("error serializing response: {}", e)))?;
     let l1 = ((response.len() >> 8) & 0xff) as u8;
     let l2 = (response.len() & 0xff) as u8;
     response.insert(0, l1);

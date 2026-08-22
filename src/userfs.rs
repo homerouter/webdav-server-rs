@@ -1,17 +1,31 @@
 use std::any::Any;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "quota")]
+use std::sync::OnceLock;
+#[cfg(feature = "quota")]
+use std::time::Duration;
 
-use webdav_handler::davpath::DavPath;
-use webdav_handler::fs::*;
-use webdav_handler::localfs::LocalFs;
+use dav_server::davpath::DavPath;
+#[cfg(feature = "quota")]
+use dav_server::fs::FsError;
+use dav_server::fs::{
+    DavDirEntry, DavFile, DavFileSystem, DavMetaData, FsFuture, FsStream, OpenOptions, ReadDirMeta,
+};
+use dav_server::localfs::LocalFs;
+#[cfg(feature = "quota")]
+use log::debug;
 
+#[cfg(feature = "quota")]
+use crate::cache;
 use crate::suid::UgidSwitch;
 
 #[derive(Clone)]
 pub struct UserFs {
-    pub fs:  LocalFs,
+    pub fs: LocalFs,
+    #[allow(dead_code)]
     basedir: PathBuf,
-    uid:     u32,
+    #[allow(dead_code)]
+    uid: u32,
 }
 
 impl UserFs {
@@ -21,35 +35,34 @@ impl UserFs {
         public: bool,
         case_insensitive: bool,
         macos: bool,
-    ) -> Box<UserFs>
-    {
+    ) -> Box<UserFs> {
         // uid is used for quota() calls.
         let uid = target_creds.as_ref().map(|ugid| ugid.0).unwrap_or(0);
 
         // set up the LocalFs hooks for uid switching.
-        let switch = UgidSwitch::new(target_creds.clone());
+        let switch = UgidSwitch::new(target_creds);
         let blocking_guard = Box::new(move || Box::new(switch.guard()) as Box<dyn Any>);
 
         Box::new(UserFs {
             basedir: dir.as_ref().to_path_buf(),
-            fs:      *LocalFs::new_with_fs_access_guard(
+            fs: *LocalFs::new_with_fs_access_guard(
                 dir,
                 public,
                 case_insensitive,
                 macos,
                 Some(blocking_guard),
             ),
-            uid:     uid,
+            uid,
         })
     }
 }
 
 impl DavFileSystem for UserFs {
-    fn metadata<'a>(&'a self, path: &'a DavPath) -> FsFuture<Box<dyn DavMetaData>> {
+    fn metadata<'a>(&'a self, path: &'a DavPath) -> FsFuture<'a, Box<dyn DavMetaData>> {
         self.fs.metadata(path)
     }
 
-    fn symlink_metadata<'a>(&'a self, path: &'a DavPath) -> FsFuture<Box<dyn DavMetaData>> {
+    fn symlink_metadata<'a>(&'a self, path: &'a DavPath) -> FsFuture<'a, Box<dyn DavMetaData>> {
         self.fs.symlink_metadata(path)
     }
 
@@ -57,50 +70,46 @@ impl DavFileSystem for UserFs {
         &'a self,
         path: &'a DavPath,
         meta: ReadDirMeta,
-    ) -> FsFuture<FsStream<Box<dyn DavDirEntry>>>
-    {
+    ) -> FsFuture<'a, FsStream<Box<dyn DavDirEntry>>> {
         self.fs.read_dir(path, meta)
     }
 
-    fn open<'a>(&'a self, path: &'a DavPath, options: OpenOptions) -> FsFuture<Box<dyn DavFile>> {
+    fn open<'a>(&'a self, path: &'a DavPath, options: OpenOptions) -> FsFuture<'a, Box<dyn DavFile>> {
         self.fs.open(path, options)
     }
 
-    fn create_dir<'a>(&'a self, path: &'a DavPath) -> FsFuture<()> {
+    fn create_dir<'a>(&'a self, path: &'a DavPath) -> FsFuture<'a, ()> {
         self.fs.create_dir(path)
     }
 
-    fn remove_dir<'a>(&'a self, path: &'a DavPath) -> FsFuture<()> {
+    fn remove_dir<'a>(&'a self, path: &'a DavPath) -> FsFuture<'a, ()> {
         self.fs.remove_dir(path)
     }
 
-    fn remove_file<'a>(&'a self, path: &'a DavPath) -> FsFuture<()> {
+    fn remove_file<'a>(&'a self, path: &'a DavPath) -> FsFuture<'a, ()> {
         self.fs.remove_file(path)
     }
 
-    fn rename<'a>(&'a self, from: &'a DavPath, to: &'a DavPath) -> FsFuture<()> {
+    fn rename<'a>(&'a self, from: &'a DavPath, to: &'a DavPath) -> FsFuture<'a, ()> {
         self.fs.rename(from, to)
     }
 
-    fn copy<'a>(&'a self, from: &'a DavPath, to: &'a DavPath) -> FsFuture<()> {
+    fn copy<'a>(&'a self, from: &'a DavPath, to: &'a DavPath) -> FsFuture<'a, ()> {
         self.fs.copy(from, to)
     }
 
     #[cfg(feature = "quota")]
-    fn get_quota<'a>(&'a self) -> FsFuture<(u64, Option<u64>)> {
-        use crate::cache;
+    fn get_quota<'a>(&'a self) -> FsFuture<'a, (u64, Option<u64>)> {
         use fs_quota::*;
         use futures::future::FutureExt;
-        use std::time::Duration;
 
-        lazy_static::lazy_static! {
-            static ref QCACHE: cache::Cache<PathBuf, FsQuota> = cache::Cache::new().maxage(Duration::new(30, 0));
-        }
+        static QCACHE: OnceLock<cache::Cache<PathBuf, FsQuota>> = OnceLock::new();
+        let cache = QCACHE.get_or_init(|| cache::Cache::new().maxage(Duration::from_secs(30)));
 
         async move {
             let mut key = self.basedir.clone();
-            key.push(&self.uid.to_string());
-            let r = match QCACHE.get(&key) {
+            key.push(self.uid.to_string());
+            let r = match cache.get(&key) {
                 Some(r) => {
                     debug!("get_quota for {:?}: from cache", key);
                     r
@@ -115,7 +124,7 @@ impl DavFileSystem for UserFs {
                         })
                         .await?;
                     debug!("get_quota for {:?}: insert to cache", key);
-                    QCACHE.insert(key, r)
+                    cache.insert(key, r)
                 },
             };
             Ok((r.bytes_used, r.bytes_limit))

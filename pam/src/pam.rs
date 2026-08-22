@@ -3,6 +3,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(has_pam_c)]
 extern "C" {
     fn c_pam_auth(
         service: *const c_char,
@@ -10,14 +11,33 @@ extern "C" {
         pass: *const c_char,
         remip: *const c_char,
     ) -> c_int;
-    fn _c_pam_return_value(index: c_int) -> c_int;
     fn pam_strerror(pamh: *const c_void, errnum: c_int) -> *const c_char;
     fn c_pam_lower_rlimits();
 }
 
+#[cfg(not(has_pam_c))]
+unsafe fn c_pam_auth(
+    _service: *const c_char,
+    _user: *const c_char,
+    _pass: *const c_char,
+    _remip: *const c_char,
+) -> c_int {
+    1
+}
+
+#[cfg(not(has_pam_c))]
+unsafe fn pam_strerror(_pamh: *const c_void, _errnum: c_int) -> *const c_char {
+    c"PAM header unavailable at build time".as_ptr() as *const c_char
+}
+
+#[cfg(not(has_pam_c))]
+unsafe fn c_pam_lower_rlimits() {}
+
 pub(crate) const ERR_NUL_BYTE: i32 = 414243;
 pub(crate) const ERR_SEND_TO_SERVER: i32 = 414244;
 pub(crate) const ERR_RECV_FROM_SERVER: i32 = 414245;
+
+use serde::{Deserialize, Serialize};
 
 pub(crate) static TEST_MODE: AtomicUsize = AtomicUsize::new(0);
 
@@ -52,10 +72,6 @@ impl std::fmt::Display for PamError {
 }
 
 impl Error for PamError {
-    fn description(&self) -> &str {
-        "PAM authentication error"
-    }
-
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         None
     }

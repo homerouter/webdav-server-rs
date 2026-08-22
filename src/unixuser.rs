@@ -1,4 +1,3 @@
-use std;
 use std::ffi::{CStr, OsStr};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
@@ -7,20 +6,25 @@ use std::path::{Path, PathBuf};
 use tokio::task::block_in_place;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct User {
-    pub name:   String,
+    pub name: String,
     pub passwd: String,
-    pub gecos:  String,
-    pub uid:    u32,
-    pub gid:    u32,
+    pub gecos: String,
+    pub uid: u32,
+    pub gid: u32,
     pub groups: Vec<u32>,
-    pub dir:    PathBuf,
-    pub shell:  PathBuf,
+    pub dir: PathBuf,
+    pub shell: PathBuf,
 }
 
 unsafe fn cptr_to_osstr<'a>(c: *const libc::c_char) -> &'a OsStr {
-    let bytes = CStr::from_ptr(c).to_bytes();
-    OsStr::from_bytes(&bytes)
+    if c.is_null() {
+        OsStr::from_bytes(b"")
+    } else {
+        let bytes = CStr::from_ptr(c).to_bytes();
+        OsStr::from_bytes(bytes)
+    }
 }
 
 unsafe fn cptr_to_path<'a>(c: *const libc::c_char) -> &'a Path {
@@ -29,21 +33,33 @@ unsafe fn cptr_to_path<'a>(c: *const libc::c_char) -> &'a Path {
 
 unsafe fn to_user(pwd: &libc::passwd) -> User {
     // turn into (unsafe!) rust slices
-    let cs_name = CStr::from_ptr(pwd.pw_name);
-    let cs_passwd = CStr::from_ptr(pwd.pw_passwd);
-    let cs_gecos = CStr::from_ptr(pwd.pw_gecos);
+    let cs_name = if pwd.pw_name.is_null() {
+        ""
+    } else {
+        CStr::from_ptr(pwd.pw_name).to_str().unwrap_or("")
+    };
+    let cs_passwd = if pwd.pw_passwd.is_null() {
+        ""
+    } else {
+        CStr::from_ptr(pwd.pw_passwd).to_str().unwrap_or("")
+    };
+    let cs_gecos = if pwd.pw_gecos.is_null() {
+        ""
+    } else {
+        CStr::from_ptr(pwd.pw_gecos).to_str().unwrap_or("")
+    };
     let cs_dir = cptr_to_path(pwd.pw_dir);
     let cs_shell = cptr_to_path(pwd.pw_shell);
 
     // then turn the slices into safe owned values.
     User {
-        name:   cs_name.to_string_lossy().into_owned(),
-        passwd: cs_passwd.to_string_lossy().into_owned(),
-        gecos:  cs_gecos.to_string_lossy().into_owned(),
-        dir:    cs_dir.to_path_buf(),
-        shell:  cs_shell.to_path_buf(),
-        uid:    pwd.pw_uid,
-        gid:    pwd.pw_gid,
+        name: cs_name.to_string(),
+        passwd: cs_passwd.to_string(),
+        gecos: cs_gecos.to_string(),
+        dir: cs_dir.to_path_buf(),
+        shell: cs_shell.to_path_buf(),
+        uid: pwd.pw_uid,
+        gid: pwd.pw_gid,
         groups: Vec::new(),
     }
 }
@@ -77,25 +93,30 @@ impl User {
         let mut user = unsafe { to_user(&pwd) };
 
         if with_groups {
-            let mut ngroups = (buf.len() / std::mem::size_of::<libc::gid_t>()) as libc::c_int;
-            let ret = unsafe {
+            let mut groups_buf = vec![0 as libc::gid_t; 64];
+            let mut ngroups = groups_buf.len() as libc::c_int;
+            let mut ret = unsafe {
                 libc::getgrouplist(
                     cname.as_ptr(),
                     user.gid as libc::gid_t,
-                    buf.as_mut_ptr() as *mut _,
-                    &mut ngroups as *mut _,
+                    groups_buf.as_mut_ptr(),
+                    &mut ngroups,
                 )
             };
-            if ret >= 0 && ngroups > 0 {
-                let mut groups_vec = Vec::with_capacity(ngroups as usize);
-                let groups = unsafe {
-                    std::slice::from_raw_parts(buf.as_ptr() as *const libc::gid_t, ngroups as usize)
+            if ret < 0 && ngroups > 0 {
+                groups_buf.resize(ngroups as usize, 0);
+                ret = unsafe {
+                    libc::getgrouplist(
+                        cname.as_ptr(),
+                        user.gid as libc::gid_t,
+                        groups_buf.as_mut_ptr(),
+                        &mut ngroups,
+                    )
                 };
-                // Keep it as is, not filtering.
-                // Some systems requires the GID to be in the list, for some mechanisms (eg. ACL) to work.
-                // See also #25.
-                groups_vec.extend(groups.iter().map(|&g| g as u32));
-                user.groups = groups_vec;
+            }
+            if ret >= 0 && ngroups > 0 {
+                groups_buf.truncate(ngroups as usize);
+                user.groups = groups_buf;
             }
         }
 
