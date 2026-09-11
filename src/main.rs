@@ -37,8 +37,8 @@ use dav_server::{fakels::FakeLs, fs::GuardedFileSystem, ls::DavLockSystem};
 use futures_util::stream::StreamExt;
 use headers::{authorization::Basic, Authorization, HeaderMapExt};
 use http::status::StatusCode;
-use http_body_util::{combinators::UnsyncBoxBody, BodyExt, StreamBody};
-use hyper::body::Frame;
+use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Empty, StreamBody};
+use hyper::body::{Body as _, Frame, Incoming};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use tls_listener::TlsListener;
@@ -81,7 +81,7 @@ struct Server {
 }
 
 type HttpResult = Result<hyper::Response<UnsyncBoxBody<bytes::Bytes, io::Error>>, io::Error>;
-type HttpRequest = http::Request<hyper::body::Incoming>;
+type HttpRequest = http::Request<UnsyncBoxBody<bytes::Bytes, hyper::Error>>;
 
 // Server implementation.
 impl Server {
@@ -199,7 +199,7 @@ impl Server {
             // if we might continue, store a clone of the request for the next round.
             let location = &self.config.location[*route.data];
             if let Some(OnNotfound::Continue) = location.on_notfound {
-                reqdata.get_or_insert(clone_httpreq(&req));
+                reqdata = clone_empty_httpreq(&req);
             }
 
             // handle request.
@@ -250,7 +250,7 @@ impl Server {
             Some(Auth::Opportunistic) | None => auth_hdr.is_some(),
         };
         let auth_user = if do_auth {
-            let user = match self.auth.auth(&req, location, remote_ip).await {
+            let user = match self.auth.auth(req.headers(), location, remote_ip).await {
                 Ok(user) => user,
                 Err(status) => return self.auth_error(status, location).await,
             };
@@ -503,7 +503,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     tokio::spawn(async move {
                         let service = hyper::service::service_fn(move |req| {
                             let dav_server = dav_server.clone();
-                            async move { dav_server.route(req, remote_addr).await }
+                            async move {
+                                dav_server
+                                    .route(req.map(|body: Incoming| body.boxed_unsync()), remote_addr)
+                                    .await
+                            }
                         });
                         if let Err(err) = auto::Builder::new(TokioExecutor::new())
                             .serve_connection(io, service)
@@ -564,7 +568,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     tokio::spawn(async move {
                                         let service = hyper::service::service_fn(move |req| {
                                             let dav_server = dav_server.clone();
-                                            async move { dav_server.route(req, remote_addr).await }
+                                            async move {
+                                                dav_server
+                                                    .route(
+                                                        req.map(|body: Incoming| body.boxed_unsync()),
+                                                        remote_addr,
+                                                    )
+                                                    .await
+                                            }
                                         });
                                         if let Err(err) = auto::Builder::new(TokioExecutor::new())
                                             .serve_connection(io, service)
@@ -613,8 +624,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
 }
 
-// Clones a http request with an empty body.
-fn clone_httpreq(req: &HttpRequest) -> HttpRequest {
+// Clone a request only when its streaming body is known to be empty.
+fn clone_empty_httpreq(req: &HttpRequest) -> Option<HttpRequest> {
+    if req.body().size_hint().exact() != Some(0) {
+        return None;
+    }
     let mut builder = http::Request::builder()
         .method(req.method().clone())
         .uri(req.uri().clone())
@@ -622,8 +636,8 @@ fn clone_httpreq(req: &HttpRequest) -> HttpRequest {
     for (name, value) in req.headers().iter() {
         builder = builder.header(name, value);
     }
-    let empty_body = unsafe { std::mem::zeroed::<hyper::body::Incoming>() };
-    builder.body(empty_body).unwrap()
+    let empty_body = Empty::new().map_err(|never| match never {}).boxed_unsync();
+    builder.body(empty_body).ok()
 }
 
 fn expand_directory(dir: &str, pwd: Option<&Arc<unixuser::User>>) -> Result<String, StatusCode> {
@@ -672,4 +686,24 @@ fn make_listener(srv: &config::Server, addr: SocketAddr) -> io::Result<tokio::ne
     s.listen(128)?;
     let listener: std::net::TcpListener = s.into();
     tokio::net::TcpListener::from_std(listener)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http_body_util::Full;
+
+    #[test]
+    fn fallback_only_clones_empty_requests() {
+        let empty: HttpRequest =
+            http::Request::new(Empty::new().map_err(|never| match never {}).boxed_unsync());
+        assert!(clone_empty_httpreq(&empty).is_some());
+
+        let body: HttpRequest = http::Request::new(
+            Full::new(bytes::Bytes::from_static(b"body"))
+                .map_err(|never| match never {})
+                .boxed_unsync(),
+        );
+        assert!(clone_empty_httpreq(&body).is_none());
+    }
 }

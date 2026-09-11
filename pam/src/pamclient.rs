@@ -24,13 +24,25 @@ use crate::pam::{PamError, ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER};
 use crate::pamserver::{PamResponse, PamServer};
 
 // Request to be sent to the server process.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct PamRequest {
     pub id: u64,
     pub user: String,
     pub pass: String,
     pub service: String,
     pub remip: Option<String>,
+}
+
+impl std::fmt::Debug for PamRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PamRequest")
+            .field("id", &self.id)
+            .field("user", &self.user)
+            .field("pass", &"<redacted>")
+            .field("service", &self.service)
+            .field("remip", &self.remip)
+            .finish()
+    }
 }
 
 // sent over request channel to PamAuthTask.
@@ -260,5 +272,24 @@ impl PamAuthTask {
                 let _ = resp_chan.send(resp.result);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_debug_redacts_password() {
+        let req = PamRequest {
+            id: 1,
+            user: "alice".into(),
+            pass: "top-secret".into(),
+            service: "webdav".into(),
+            remip: None,
+        };
+        let debug = format!("{req:?}");
+        assert!(!debug.contains("top-secret"));
+        assert!(debug.contains("<redacted>"));
     }
 }
