@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y debhelper dpkg-dev fakeroot libpam0g-dev libtirpc-dev rpcsvc-proto
+          sudo apt-get install -y libpam0g-dev libtirpc-dev rpcsvc-proto
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -47,13 +47,3 @@ jobs:
 
       - name: Build minimal (no default features)
         run: cargo build --no-default-features --release
-
-      - name: Build Debian package
-        run: dpkg-buildpackage -b -us -uc
-
-      - name: Upload Debian package
-        uses: actions/upload-artifact@v4
-        with:
-          name: webdav-server-deb
-          path: ../*.deb
-          if-no-files-found: error
