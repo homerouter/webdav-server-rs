@@ -54,7 +54,11 @@ mod tests {
                 return Err(e);
             }
 
-            if let Ok(_) = pam2.auth(TEST_STR, "unknown", "bar", Some(TEST_STR)).await {
+            if pam2
+                .auth(TEST_STR, "unknown", "bar", Some(TEST_STR))
+                .await
+                .is_ok()
+            {
                 eprintln!("auth(unknown) succeeded, should have failed");
                 return Err(PamError::unknown());
             }
