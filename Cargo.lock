@@ -1871,6 +1871,7 @@ dependencies = [
  "pwhash",
  "regex",
  "rustls-pemfile",
+ "rustls-pki-types",
  "serde",
  "socket2 0.5.5",
  "tls-listener",
