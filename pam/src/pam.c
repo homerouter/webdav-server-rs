@@ -11,7 +11,9 @@ struct creds {
 static int c_pam_conv(int num_msg, const struct pam_message **msg,
                       struct pam_response **resp, void *appdata)
 {
-    if (num_msg <= 0 || num_msg > PAM_MAX_NUM_MSG)
+    if (resp)
+        *resp = NULL;
+    if (num_msg <= 0 || num_msg > PAM_MAX_NUM_MSG || !msg || !resp || !appdata)
         return PAM_CONV_ERR;
 
     struct pam_response *reply = calloc(num_msg, sizeof(struct pam_response));
@@ -21,14 +23,21 @@ static int c_pam_conv(int num_msg, const struct pam_message **msg,
     struct creds *creds = (struct creds *)appdata;
 
     for (int count = 0; count < num_msg; count++) {
+        if (!msg[count])
+            goto conv_err;
+
         switch (msg[count]->msg_style) {
             case PAM_PROMPT_ECHO_ON:
                 reply[count].resp_retcode = 0;
                 reply[count].resp = strdup(creds->user ? creds->user : "");
+                if (reply[count].resp == NULL)
+                    goto buf_err;
                 break;
             case PAM_PROMPT_ECHO_OFF:
                 reply[count].resp_retcode = 0;
                 reply[count].resp = strdup(creds->password ? creds->password : "");
+                if (reply[count].resp == NULL)
+                    goto buf_err;
                 break;
             case PAM_TEXT_INFO:
             case PAM_ERROR_MSG:
@@ -36,16 +45,31 @@ static int c_pam_conv(int num_msg, const struct pam_message **msg,
                 reply[count].resp = NULL;
                 break;
             default:
-                for (int i = 0; i < num_msg; i++) {
-                    if (reply[i].resp)
-                        free(reply[i].resp);
-                }
-                free(reply);
-                return PAM_CONV_ERR;
+                goto conv_err;
         }
     }
     *resp = reply;
     return PAM_SUCCESS;
+
+buf_err:
+    for (int i = 0; i < num_msg; i++) {
+        if (reply[i].resp) {
+            memset(reply[i].resp, 0, strlen(reply[i].resp));
+            free(reply[i].resp);
+        }
+    }
+    free(reply);
+    return PAM_BUF_ERR;
+
+conv_err:
+    for (int i = 0; i < num_msg; i++) {
+        if (reply[i].resp) {
+            memset(reply[i].resp, 0, strlen(reply[i].resp));
+            free(reply[i].resp);
+        }
+    }
+    free(reply);
+    return PAM_CONV_ERR;
 }
 
 int c_pam_auth(char *service, char *user, char *pass, char *remip)

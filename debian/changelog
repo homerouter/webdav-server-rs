@@ -1,9 +1,25 @@
+webdav-server-rs (0.4.4-1) unstable; urgency=medium
+
+  * Release 0.4.4.
+  * Reconcile v0.4.2 fixes: safe request fallback, mtab parsing, credential redaction.
+  * Harden PAM conversation handling with strdup allocation checks and zeroing.
+
+ -- debiansid <9624961+debiansid@users.noreply.github.com>  Thu, 30 Oct 2026 14:35:00 +0800
+
 webdav-server-rs (0.4.3-1) unstable; urgency=medium
 
   * Release 0.4.3.
   * Modernize HTTP/TLS/async stack to hyper 1.x, dav-server 0.11, rustls 0.26.
 
  -- debiansid <9624961+debiansid@users.noreply.github.com>  Mon, 28 Sep 2026 16:25:00 +0800
+
+webdav-server-rs (0.4.2-1) unstable; urgency=medium
+
+  * Release 0.4.2.
+  * Harden request fallback, quota lookup, and PAM logging.
+  * Test all supported workspace targets in CI.
+
+ -- debiansid <9624961+debiansid@users.noreply.github.com>  Fri, 11 Sep 2026 15:44:32 +0800
 
 webdav-server-rs (0.4.1-1) unstable; urgency=medium
 
