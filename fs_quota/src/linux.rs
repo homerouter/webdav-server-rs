@@ -71,29 +71,40 @@ pub(crate) fn read_mtab() -> io::Result<Vec<Mtab>> {
     let mut result = Vec::new();
     for l in reader.lines() {
         let l2 = l?;
-        let line = l2.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+        if let Some(entry) = parse_mtab_line(l2.trim()) {
+            result.push(entry);
         }
-        let words = line.split_whitespace().collect::<Vec<_>>();
-        if words.len() < 3 {
-            continue;
-        }
-        let (host, device) = if words[2].starts_with("nfs") {
-            if let Some((host, path)) = words[0].split_once(':') {
-                (Some(host.to_string()), path)
-            } else {
-                continue;
-            }
-        } else {
-            (None, words[2])
-        };
-        result.push(Mtab {
-            host,
-            device: device.to_string(),
-            directory: words[1].to_string(),
-            fstype: words[2].to_string(),
-        });
     }
     Ok(result)
+}
+
+fn parse_mtab_line(line: &str) -> Option<Mtab> {
+    let words = line.split_whitespace().collect::<Vec<_>>();
+    if line.is_empty() || line.starts_with('#') || words.len() < 3 {
+        return None;
+    }
+    let (host, device) = if words[2].starts_with("nfs") {
+        let (host, path) = words[0].split_once(':')?;
+        (Some(host.to_string()), path)
+    } else {
+        (None, words[0])
+    };
+    Some(Mtab {
+        host,
+        device: device.to_string(),
+        directory: words[1].to_string(),
+        fstype: words[2].to_string(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_mtab_entry_uses_device_field() {
+        let entry = parse_mtab_line("/dev/vda1 / ext4 rw 0 0").unwrap();
+        assert_eq!(entry.device, "/dev/vda1");
+        assert_eq!(entry.fstype, "ext4");
+    }
 }

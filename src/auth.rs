@@ -5,11 +5,8 @@ use std::sync::Arc;
 use log::debug;
 
 use crate::config::{AuthType, Config, Location};
-
 use headers::{authorization::Basic, Authorization, HeaderMapExt};
 use http::status::StatusCode;
-
-type HttpRequest = http::Request<hyper::body::Incoming>;
 
 #[derive(Clone)]
 pub struct Auth {
@@ -40,12 +37,12 @@ impl Auth {
     // authenticate user.
     pub async fn auth<'a>(
         &'a self,
-        req: &'a HttpRequest,
+        headers: &'a http::HeaderMap,
         location: &Location,
         _remote_ip: SocketAddr,
     ) -> Result<String, StatusCode> {
         // we must have a login/pass
-        let basic = match req.headers().typed_get::<Authorization<Basic>>() {
+        let basic = match headers.typed_get::<Authorization<Basic>>() {
             Some(Authorization(basic)) => basic,
             _ => return Err(StatusCode::UNAUTHORIZED),
         };
@@ -60,7 +57,7 @@ impl Auth {
             .or(self.config.accounts.auth_type.as_ref());
         match auth_type {
             #[cfg(feature = "pam")]
-            Some(&AuthType::Pam) => self.auth_pam(req, user, pass, _remote_ip).await,
+            Some(&AuthType::Pam) => self.auth_pam(headers, user, pass, _remote_ip).await,
             Some(AuthType::HtPasswd(ht)) => self.auth_htpasswd(user, pass, ht.as_str()).await,
             None => {
                 debug!("need authentication, but auth-type is not set");
@@ -73,7 +70,7 @@ impl Auth {
     #[cfg(feature = "pam")]
     async fn auth_pam<'a>(
         &'a self,
-        req: &'a HttpRequest,
+        headers: &'a http::HeaderMap,
         user: &'a str,
         pass: &'a str,
         remote_ip: SocketAddr,
@@ -83,7 +80,7 @@ impl Auth {
         let ip_string = if ip.is_loopback() {
             // if it's loopback, take the value from the x-forwarded-for
             // header, if present.
-            req.headers()
+            headers
                 .get("x-forwarded-for")
                 .and_then(|s| s.to_str().ok())
                 .and_then(|s| s.split(',').next())
