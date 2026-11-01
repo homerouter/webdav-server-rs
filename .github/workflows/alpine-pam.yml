@@ -1,0 +1,53 @@
+name: Alpine Linux PAM Test
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  test-alpine-pam:
+    name: Test PAM on Alpine Linux (musl)
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    env:
+      RUSTFLAGS: "-C target-feature=-crt-static"
+    steps:
+      - name: Install system dependencies
+        run: |
+          apk update
+          apk add --no-cache \
+            bash \
+            build-base \
+            curl \
+            git \
+            linux-pam \
+            linux-pam-dev \
+            libtirpc-dev \
+            rpcsvc-proto
+          git config --global --add safe.directory '*'
+
+      - name: Install Rust toolchain via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: actions/checkout@v4
+
+      - name: Build webdav-server (Release)
+        run: |
+          source "$HOME/.cargo/env"
+          cargo build --release --all-targets --all-features
+
+      - name: Run Alpine Linux PAM E2E Test
+        run: |
+          source "$HOME/.cargo/env"
+          chmod +x tests/e2e_pam_alpine.sh
+          bash tests/e2e_pam_alpine.sh target/release/webdav-server

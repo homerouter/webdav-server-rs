@@ -64,6 +64,7 @@ jobs:
             build-base \
             curl \
             git \
+            linux-pam \
             linux-pam-dev \
             libtirpc-dev \
             rpcsvc-proto
@@ -98,6 +99,11 @@ jobs:
 
       - name: Run WebDAV End-to-End Tests (Release)
         run: bash tests/e2e_webdav.sh target/release/webdav-server
+
+      - name: Run Alpine Linux PAM E2E Test
+        run: |
+          chmod +x tests/e2e_pam_alpine.sh
+          bash tests/e2e_pam_alpine.sh target/release/webdav-server
 
       - name: Build minimal (no default features)
         run: cargo build --no-default-features --release
