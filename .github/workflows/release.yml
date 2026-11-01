@@ -16,9 +16,12 @@ permissions:
   contents: write
 
 jobs:
-  build-deb:
-    name: Build Debian Package (.deb)
+  build-deb-glibc:
+    name: Build Debian Package & glibc Binary
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.versioning.outputs.tag }}
+      version: ${{ steps.versioning.outputs.version }}
 
     steps:
       - name: Checkout repository
@@ -60,16 +63,113 @@ jobs:
           mv ../*.deb dist/ 2>/dev/null || true
           ls -la dist/
 
-      - name: Upload artifacts
+      - name: Build standalone glibc tarball
+        run: |
+          VERSION="${{ steps.versioning.outputs.version }}"
+          PKG_NAME="webdav-server-v${VERSION}-linux-x86_64-gnu"
+          mkdir -p "dist-pkg/${PKG_NAME}"
+          cp target/release/webdav-server "dist-pkg/${PKG_NAME}/"
+          cp webdav-server.toml "dist-pkg/${PKG_NAME}/"
+          cp README.md "dist-pkg/${PKG_NAME}/"
+          tar -czf "dist/${PKG_NAME}.tar.gz" -C dist-pkg "${PKG_NAME}"
+
+      - name: Upload glibc artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: webdav-server-deb
-          path: dist/*.deb
+          name: artifacts-glibc
+          path: dist/*
+
+  build-alpine-musl:
+    name: Build Alpine Linux musl Binary
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    env:
+      RUSTFLAGS: "-C target-feature=-crt-static"
+    steps:
+      - name: Install system dependencies
+        run: |
+          apk update
+          apk add --no-cache \
+            bash \
+            build-base \
+            curl \
+            git \
+            linux-pam \
+            linux-pam-dev \
+            libtirpc-dev \
+            rpcsvc-proto \
+            tar
+          git config --global --add safe.directory '*'
+
+      - name: Install Rust toolchain via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: actions/checkout@v4
+
+      - name: Determine Version & Tag
+        id: versioning
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag_name }}" ]; then
+            TAG="${{ inputs.tag_name }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v0.4.4"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Build release (musl)
+        run: |
+          source "$HOME/.cargo/env"
+          cargo build --release --all-targets --all-features
+
+      - name: Test binary with Alpine PAM E2E
+        run: |
+          chmod +x tests/e2e_pam_alpine.sh
+          bash tests/e2e_pam_alpine.sh target/release/webdav-server
+
+      - name: Package Alpine musl tarball
+        run: |
+          VERSION="${{ steps.versioning.outputs.version }}"
+          PKG_NAME="webdav-server-v${VERSION}-linux-x86_64-musl"
+          mkdir -p "dist/${PKG_NAME}"
+          cp target/release/webdav-server "dist/${PKG_NAME}/"
+          cp webdav-server.toml "dist/${PKG_NAME}/"
+          cp README.md "dist/${PKG_NAME}/"
+          mkdir -p dist-out
+          tar -czf "dist-out/${PKG_NAME}.tar.gz" -C dist "${PKG_NAME}"
+          ls -lh dist-out/
+
+      - name: Upload musl artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-musl
+          path: dist-out/*
+
+  publish-release:
+    name: Publish GitHub Release (Dual glibc & musl)
+    needs: [build-deb-glibc, build-alpine-musl]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: List Release Assets
+        run: ls -la release-assets/
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.versioning.outputs.tag }}
-          name: ${{ steps.versioning.outputs.tag }}
-          files: dist/*.deb
+          tag_name: ${{ needs.build-deb-glibc.outputs.tag }}
+          name: ${{ needs.build-deb-glibc.outputs.tag }}
+          files: release-assets/*
           generate_release_notes: true
