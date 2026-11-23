@@ -1,0 +1,52 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: Build (Debian 12)
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+    steps:
+      - name: Install native dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libpam0g-dev \
+            libtirpc-dev \
+            rpcsvc-proto
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Upload release binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: webdav-server-debian12-x86_64
+          path: target/release/webdav-server
+          if-no-files-found: error
+          retention-days: 14
