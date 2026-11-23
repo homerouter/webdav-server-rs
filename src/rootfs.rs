@@ -46,6 +46,10 @@ impl DavFileSystem for RootFs {
         .boxed()
     }
 
+    fn symlink_metadata<'a>(&'a self, path: &'a DavPath) -> FsFuture<'a, Box<dyn DavMetaData>> {
+        self.metadata(path)
+    }
+
     // Only return one entry: "user".
     fn read_dir<'a>(
         &'a self,
