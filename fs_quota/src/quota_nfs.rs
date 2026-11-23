@@ -6,7 +6,7 @@ use log::debug;
 use crate::{FqError, FsQuota, Mtab};
 
 #[cfg(has_nfs_c)]
-extern "C" {
+unsafe extern "C" {
     fn fs_quota_nfs(
         host: *const c_char,
         path: *const c_char,
@@ -39,7 +39,7 @@ unsafe fn fs_quota_nfs(
 #[cfg(has_nfs_c)]
 mod ffi {
     use super::*;
-    extern "C" {
+    unsafe extern "C" {
         pub(crate) fn clnt_sperrno(e: c_int) -> *const c_char;
     }
 }

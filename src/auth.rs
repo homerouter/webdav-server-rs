@@ -5,7 +5,7 @@ use std::sync::Arc;
 use log::debug;
 
 use crate::config::{AuthType, Config, Location};
-use headers::{authorization::Basic, Authorization, HeaderMapExt};
+use headers::{Authorization, HeaderMapExt, authorization::Basic};
 use http::status::StatusCode;
 
 #[derive(Clone)]
@@ -142,10 +142,11 @@ impl Auth {
             // Check each line for a match.
             for line in lines {
                 let mut fields = line.split(':');
-                if let (Some(htuser), Some(htpass)) = (fields.next(), fields.next()) {
-                    if htuser == user && pwhash::unix::verify(&pass, htpass) {
-                        return Ok(user);
-                    }
+                if let (Some(htuser), Some(htpass)) = (fields.next(), fields.next())
+                    && htuser == user
+                    && pwhash::unix::verify(&pass, htpass)
+                {
+                    return Ok(user);
                 }
             }
 

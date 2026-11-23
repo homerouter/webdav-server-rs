@@ -180,8 +180,8 @@ impl ToSocketAddrs for OneOrManyAddr {
     type Iter = std::vec::IntoIter<SocketAddr>;
     fn to_socket_addrs(&self) -> io::Result<std::vec::IntoIter<SocketAddr>> {
         let i = match self {
-            OneOrManyAddr::Many(ref v) => v.to_owned(),
-            OneOrManyAddr::One(ref s) => vec![*s],
+            OneOrManyAddr::Many(v) => v.to_owned(),
+            OneOrManyAddr::One(s) => vec![*s],
         };
         Ok(i.into_iter())
     }
@@ -264,11 +264,11 @@ pub fn build_routes(cfg: &str, config: &mut Config) -> io::Result<()> {
 
 pub fn check(cfg: &str, config: &Config) {
     #[cfg(feature = "pam")]
-    if let Some(AuthType::Pam) = config.accounts.auth_type {
-        if config.pam.service.is_empty() {
-            eprintln!("{}: missing section [pam]", cfg);
-            exit(1);
-        }
+    if let Some(AuthType::Pam) = config.accounts.auth_type
+        && config.pam.service.is_empty()
+    {
+        eprintln!("{}: missing section [pam]", cfg);
+        exit(1);
     }
 
     if config.server.listen.is_empty() && config.server.tls_listen.is_empty() {

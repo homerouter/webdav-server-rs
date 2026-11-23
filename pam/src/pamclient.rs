@@ -13,14 +13,14 @@ use futures::join;
 use futures::{sink::SinkExt, stream::StreamExt};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
 use tokio::net::unix::ReadHalf as UnixReadHalf;
 use tokio::net::unix::WriteHalf as UnixWriteHalf;
-use tokio::net::UnixStream;
 
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 
-use crate::pam::{PamError, ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER};
+use crate::pam::{ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER, PamError};
 use crate::pamserver::{PamResponse, PamServer};
 
 // Request to be sent to the server process.
@@ -213,7 +213,7 @@ impl PamAuthTask {
             }
 
             // serialize data and send.
-            let mut data: Vec<u8> = match bincode::serialize(&req) {
+            let mut data: Vec<u8> = match bincode::serde::encode_to_vec(&req, bincode::config::standard()) {
                 Ok(data) => data,
                 Err(e) => {
                     // this panic can never happen at runtime.
@@ -255,13 +255,14 @@ impl PamAuthTask {
             }
 
             // deserialize.
-            let resp: PamResponse = match bincode::deserialize(&data[..]) {
-                Ok(req) => req,
-                Err(_) => {
-                    // this panic can never happen at runtime.
-                    panic!("PamCLient: error deserializing response");
-                },
-            };
+            let (resp, _): (PamResponse, usize) =
+                match bincode::serde::decode_from_slice(&data[..], bincode::config::standard()) {
+                    Ok(req) => req,
+                    Err(_) => {
+                        // this panic can never happen at runtime.
+                        panic!("PamCLient: error deserializing response");
+                    },
+                };
 
             // and send response to waiting requester.
             let resp_chan = {
@@ -291,5 +292,30 @@ mod tests {
         let debug = format!("{req:?}");
         assert!(!debug.contains("top-secret"));
         assert!(debug.contains("<redacted>"));
+    }
+
+    // The wire format is bincode 2 `standard()` (varint); guard against format drift.
+    #[test]
+    fn wire_roundtrip() {
+        let cfg = bincode::config::standard();
+        let req = PamRequest {
+            id: u64::MAX,
+            user: "alice".into(),
+            pass: "pw".into(),
+            service: "webdav".into(),
+            remip: Some("::1".into()),
+        };
+        let buf = bincode::serde::encode_to_vec(&req, cfg).unwrap();
+        let (back, n): (PamRequest, usize) = bincode::serde::decode_from_slice(&buf, cfg).unwrap();
+        assert_eq!(n, buf.len());
+        assert_eq!((back.id, back.user, back.remip), (req.id, req.user, req.remip));
+
+        for result in [Ok(()), Err(PamError::unknown())] {
+            let res = PamResponse { id: 7, result };
+            let buf = bincode::serde::encode_to_vec(&res, cfg).unwrap();
+            let (back, _): (PamResponse, usize) = bincode::serde::decode_from_slice(&buf, cfg).unwrap();
+            assert_eq!(back.id, 7);
+            assert_eq!(back.result.is_ok(), res.result.is_ok());
+        }
     }
 }

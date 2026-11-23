@@ -4,8 +4,8 @@
 use std::ffi::CString;
 use std::fs::File;
 use std::io;
-use std::io::prelude::*;
 use std::io::BufReader;
+use std::io::prelude::*;
 use std::os::raw::{c_char, c_int};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -13,7 +13,7 @@ use std::path::Path;
 use crate::{FqError, FsQuota, Mtab};
 
 // The actual implementation is done in C, and imported here.
-extern "C" {
+unsafe extern "C" {
     fn fs_quota_linux(
         device: *const c_char,
         id: c_int,
