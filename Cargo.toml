@@ -67,7 +67,6 @@ hyper = { version = "1.5", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 libc = "0.2"
 log = "0.4"
-nix = { version = "0.32", features = ["process", "user", "fs", "signal"] }
 pam-sandboxed = { path = "pam", version = "0.2.0", optional = true }
 percent-encoding = "2.3"
 pwhash = "1.0.0"

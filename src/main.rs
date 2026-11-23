@@ -545,7 +545,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tls_servers.push(async move {
                     loop {
                         // reuse the incoming socket after the server exits.
-                        let listen_fd = match nix::unistd::dup(&master_listen_fd) {
+                        let listen_fd = match master_listen_fd.try_clone() {
                             Ok(fd) => fd,
                             Err(e) => {
                                 eprintln!("{}: server error: dup: {}", PROGNAME, e);
