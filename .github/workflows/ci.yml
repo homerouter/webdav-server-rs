@@ -48,7 +48,7 @@ jobs:
       - name: Run WebDAV End-to-End Tests (Debug)
         run: |
           chmod +x tests/e2e_webdav.sh
-          bash tests/e2e_webdav.sh target/debug/webdav-server
+          bash tests/e2e_webdav.sh target/debug/webdavd
 
       - name: Build minimal (no default features)
         run: cargo build --no-default-features --release
@@ -103,18 +103,18 @@ jobs:
       - name: Run WebDAV End-to-End Tests (Debug)
         run: |
           chmod +x tests/e2e_webdav.sh
-          bash tests/e2e_webdav.sh target/debug/webdav-server
+          bash tests/e2e_webdav.sh target/debug/webdavd
 
       - name: Build release (all features)
         run: cargo build --release --all-targets --all-features
 
       - name: Run WebDAV End-to-End Tests (Release)
-        run: bash tests/e2e_webdav.sh target/release/webdav-server
+        run: bash tests/e2e_webdav.sh target/release/webdavd
 
       - name: Run Alpine Linux PAM E2E Test
         run: |
           chmod +x tests/e2e_pam_alpine.sh
-          bash tests/e2e_pam_alpine.sh target/release/webdav-server
+          bash tests/e2e_pam_alpine.sh target/release/webdavd
 
       - name: Build minimal (no default features)
         run: cargo build --no-default-features --release

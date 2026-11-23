@@ -13,10 +13,10 @@ NC='\033[0m' # No Color
 PASSED_COUNT=0
 FAILED_COUNT=0
 
-BINARY="${1:-target/release/webdav-server}"
+BINARY="${1:-target/release/webdavd}"
 if [ ! -f "$BINARY" ]; then
-    if [ -f "target/debug/webdav-server" ]; then
-        BINARY="target/debug/webdav-server"
+    if [ -f "target/debug/webdavd" ]; then
+        BINARY="target/debug/webdavd"
     else
         echo -e "${RED}ERROR: Binary '$BINARY' not found. Please build first.${NC}"
         exit 1
@@ -69,7 +69,7 @@ SERVER_LOG="${TEST_DIR}/server.log"
 cat <<EOF > "$CONFIG_FILE"
 [server]
   listen = [ "127.0.0.1:${PORT}" ]
-  identification = "webdav-server-alpine-pam"
+  identification = "webdavd-alpine-pam"
 
 [accounts]
   auth-type = "pam"
@@ -86,7 +86,7 @@ cat <<EOF > "$CONFIG_FILE"
   directory = "${USER_HOME}"
 EOF
 
-# 4. Start webdav-server in background
+# 4. Start webdavd in background
 "$BINARY" -c "$CONFIG_FILE" -D > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 

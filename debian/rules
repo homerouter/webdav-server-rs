@@ -15,6 +15,6 @@ override_dh_auto_clean:
 override_dh_installsystemd:
 
 override_dh_installinit:
-	dh_installinit --name webdav-server
-	dh_installsystemd --name webdav-server
+	dh_installinit --name webdavd
+	dh_installsystemd --name webdavd
 

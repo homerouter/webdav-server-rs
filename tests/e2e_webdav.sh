@@ -13,10 +13,10 @@ NC='\033[0m' # No Color
 PASSED_COUNT=0
 FAILED_COUNT=0
 
-BINARY="${1:-target/debug/webdav-server}"
+BINARY="${1:-target/debug/webdavd}"
 if [ ! -f "$BINARY" ]; then
-    if [ -f "target/release/webdav-server" ]; then
-        BINARY="target/release/webdav-server"
+    if [ -f "target/release/webdavd" ]; then
+        BINARY="target/release/webdavd"
     else
         echo -e "${RED}ERROR: Binary '$BINARY' not found. Please build with 'cargo build' first.${NC}"
         exit 1
@@ -56,7 +56,7 @@ cat <<EOF > "$CONFIG_FILE"
   tls_listen = [ "127.0.0.1:${TLS_PORT}" ]
   tls_cert = "${TLS_CERT}"
   tls_key = "${TLS_KEY}"
-  identification = "webdav-server-rs-e2e"
+  identification = "webdavd-rs-e2e"
 
 [htpasswd.testauth]
   htpasswd = "${HTPASSWD_FILE}"
@@ -83,7 +83,7 @@ echo -e "${BLUE}  Binary: $BINARY                                   ${NC}"
 echo -e "${BLUE}  URL:    $BASE_URL                                 ${NC}"
 echo -e "${BLUE}====================================================${NC}"
 
-# Start webdav-server in background
+# Start webdavd in background
 "$BINARY" -c "$CONFIG_FILE" -D > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 

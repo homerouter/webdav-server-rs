@@ -4,7 +4,7 @@ pam/Cargo.lock
 fs_quota/Cargo.lock
 fs_quota/src/rquota.h
 fs_quota/src/rquota_xdr.c
-src/webdav-server.toml
+src/webdavd.toml
 debian/.debhelper
 debian/*-stamp
 debian/*.debhelper

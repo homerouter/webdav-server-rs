@@ -1,4 +1,4 @@
-Source: webdav-server-rs
+Source: webdavd-rs
 Section: net
 Priority: extra
 Maintainer: Miquel van Smoorenburg <mike@langeraar.net>
@@ -6,7 +6,7 @@ Uploaders: XS4ALL Unixbeheer <unixbeheer@xs4all.net>, Miquel van Smoorenburg (XS
 Build-Depends: debhelper (>= 12), gcc, libc-dev, libc-dev-bin, libpam0g-dev, libtirpc-dev, rpcsvc-proto
 Standards-Version: 4.6.0
 
-Package: webdav-server-rs
+Package: webdavd-rs
 Architecture: any
 Depends: ${shlibs:Depends}, systemd
 Description: Webdav server

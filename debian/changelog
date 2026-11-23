@@ -1,3 +1,12 @@
+webdavd-rs (0.4.5-1) unstable; urgency=medium
+
+  * Release 0.4.5.
+  * Rename project, binary and packages from webdav-server to webdavd
+    (config now /etc/webdavd.toml, unit webdavd.service).
+  * Add TLS listener, symlink hiding and PAM conversation tests to CI.
+
+ -- debiansid <9624961+debiansid@users.noreply.github.com>  Mon, 23 Nov 2026 22:00:00 +0800
+
 webdav-server-rs (0.4.4-1) unstable; urgency=medium
 
   * Release 0.4.4.

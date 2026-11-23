@@ -14,8 +14,8 @@
   # Optional - if not set, will not change uid.
   uid = 33
   gid = 33
-  # Server: header to send (default: "webdav-server-rs")
-  identification = "webdav-server-rs"
+  # Server: header to send (default: "webdavd-rs")
+  identification = "webdavd-rs"
 
 #
 # User settings.
