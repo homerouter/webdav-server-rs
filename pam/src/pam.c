@@ -8,6 +8,13 @@ struct creds {
     char *password;
 };
 
+static void secure_memzero(void *v, size_t n)
+{
+    volatile unsigned char *p = (volatile unsigned char *)v;
+    while (n--)
+        *p++ = 0;
+}
+
 static int c_pam_conv(int num_msg, const struct pam_message **msg,
                       struct pam_response **resp, void *appdata)
 {
@@ -54,7 +61,7 @@ static int c_pam_conv(int num_msg, const struct pam_message **msg,
 buf_err:
     for (int i = 0; i < num_msg; i++) {
         if (reply[i].resp) {
-            memset(reply[i].resp, 0, strlen(reply[i].resp));
+            secure_memzero(reply[i].resp, strlen(reply[i].resp));
             free(reply[i].resp);
         }
     }
@@ -64,7 +71,7 @@ buf_err:
 conv_err:
     for (int i = 0; i < num_msg; i++) {
         if (reply[i].resp) {
-            memset(reply[i].resp, 0, strlen(reply[i].resp));
+            secure_memzero(reply[i].resp, strlen(reply[i].resp));
             free(reply[i].resp);
         }
     }

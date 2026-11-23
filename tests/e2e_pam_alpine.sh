@@ -93,6 +93,10 @@ cleanup() {
     fi
     rm -rf "$TEST_DIR"
     rm -f "${USER_HOME}/pam_sample.txt"
+    if [ "$(id -u)" -eq 0 ]; then
+        deluser --remove-home "$TEST_USER" 2>/dev/null || userdel -r "$TEST_USER" 2>/dev/null || true
+        rm -f /etc/pam.d/webdav
+    fi
 }
 trap cleanup EXIT INT TERM
 
@@ -100,6 +104,10 @@ trap cleanup EXIT INT TERM
 echo -n "Waiting for server to become ready..."
 READY=0
 for i in {1..30}; do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo -e "\n${RED}Server process died unexpectedly during startup.${NC}"
+        break
+    fi
     CODE=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" "$BASE_URL/home/" || true)
     if [ "$CODE" = "401" ] || [ "$CODE" = "200" ]; then
         READY=1
