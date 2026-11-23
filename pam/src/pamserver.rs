@@ -8,8 +8,6 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::sync::{Arc, Mutex};
 
-use bincode::{deserialize, serialize};
-
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 
@@ -99,10 +97,11 @@ impl PamServer {
             if let Err(e) = res {
                 panic!("PamServer::serve: read socket: {}", e);
             }
-            let req: PamRequest = match deserialize(&data[..]) {
-                Ok(req) => req,
-                Err(_) => panic!("PamServer::serve: error deserializing request"),
-            };
+            let (req, _): (PamRequest, usize) =
+                match bincode::serde::decode_from_slice(&data[..], bincode::config::standard()) {
+                    Ok(req) => req,
+                    Err(_) => panic!("PamServer::serve: error deserializing request"),
+                };
             trace!(
                 "PamServer::serve: read request {:?} active threads: {} queued {}",
                 req,
@@ -152,8 +151,8 @@ fn pam_process(req: PamRequest, sock: Arc<Mutex<StdUnixStream>>) -> Result<(), i
 
     // and send back result.
     trace!("PamServer::pam_process: returning response {:?}", res);
-    let mut response: Vec<u8> =
-        serialize(&res).map_err(|e| io::Error::other(format!("error serializing response: {}", e)))?;
+    let mut response: Vec<u8> = bincode::serde::encode_to_vec(&res, bincode::config::standard())
+        .map_err(|e| io::Error::other(format!("error serializing response: {}", e)))?;
     let l1 = ((response.len() >> 8) & 0xff) as u8;
     let l2 = (response.len() & 0xff) as u8;
     response.insert(0, l1);

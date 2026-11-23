@@ -213,7 +213,7 @@ impl PamAuthTask {
             }
 
             // serialize data and send.
-            let mut data: Vec<u8> = match bincode::serialize(&req) {
+            let mut data: Vec<u8> = match bincode::serde::encode_to_vec(&req, bincode::config::standard()) {
                 Ok(data) => data,
                 Err(e) => {
                     // this panic can never happen at runtime.
@@ -255,13 +255,14 @@ impl PamAuthTask {
             }
 
             // deserialize.
-            let resp: PamResponse = match bincode::deserialize(&data[..]) {
-                Ok(req) => req,
-                Err(_) => {
-                    // this panic can never happen at runtime.
-                    panic!("PamCLient: error deserializing response");
-                },
-            };
+            let (resp, _): (PamResponse, usize) =
+                match bincode::serde::decode_from_slice(&data[..], bincode::config::standard()) {
+                    Ok(req) => req,
+                    Err(_) => {
+                        // this panic can never happen at runtime.
+                        panic!("PamCLient: error deserializing response");
+                    },
+                };
 
             // and send response to waiting requester.
             let resp_chan = {
