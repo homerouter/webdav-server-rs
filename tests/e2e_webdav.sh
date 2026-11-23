@@ -37,6 +37,15 @@ SERVER_LOG="${TEST_DIR}/server.log"
 
 mkdir -p "$PUBLIC_DIR" "$SECURE_DIR"
 
+# Self-signed certificate for the TLS listener tests.
+TLS_PORT="${TLS_PORT:-49181}"
+TLS_URL="https://localhost:${TLS_PORT}"
+TLS_KEY="${TEST_DIR}/tls.key"
+TLS_CERT="${TEST_DIR}/tls.crt"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+    -keyout "$TLS_KEY" -out "$TLS_CERT" >/dev/null 2>&1
+
 # Create htpasswd for user 'testuser' with password 'testpass123'
 echo 'testuser:$6$1tiQyAMp5EEviJiu$kUPNGuCt31zOwpNaLTdiAUC0w7ZZWLzaqF9AjJUV5TkXF0WWBmTeZscuqUjguCSs/YTuc6aor7QMQj6ZW5WLh1' > "$HTPASSWD_FILE"
 
@@ -44,6 +53,9 @@ echo 'testuser:$6$1tiQyAMp5EEviJiu$kUPNGuCt31zOwpNaLTdiAUC0w7ZZWLzaqF9AjJUV5TkXF
 cat <<EOF > "$CONFIG_FILE"
 [server]
   listen = [ "127.0.0.1:${PORT}" ]
+  tls_listen = [ "127.0.0.1:${TLS_PORT}" ]
+  tls_cert = "${TLS_CERT}"
+  tls_key = "${TLS_KEY}"
   identification = "webdav-server-rs-e2e"
 
 [htpasswd.testauth]
@@ -216,6 +228,58 @@ assert_contains "GET /secure/secret.txt body" "Super secret data" "$SECURE_BODY"
 # DELETE with valid credentials -> 204
 SECURE_DEL_STATUS=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" -u "testuser:testpass123" -X DELETE "$BASE_URL/secure/secret.txt")
 assert_status "DELETE /secure/secret.txt with valid credentials (204)" "204" "$SECURE_DEL_STATUS"
+
+echo -e "\n${YELLOW}--- 5. Symlink handling (symlink_metadata forwarding) ---${NC}"
+
+# A symlink inside the served tree pointing at a file outside it.
+echo "outside-secret" > "${TEST_DIR}/outside.txt"
+ln -s "../outside.txt" "${PUBLIC_DIR}/link.txt"
+echo "inside" > "${PUBLIC_DIR}/real.txt"
+ln -s "real.txt" "${PUBLIC_DIR}/inlink.txt"
+
+# Symlinks are never exposed: not listed, not readable, whether they stay inside the
+# served tree or escape it. Regular files next to them are unaffected.
+LIST=$(curl -s --max-time 5 -w "\n%{http_code}" -X PROPFIND -H "Depth: 1" "$BASE_URL/public/")
+assert_status "PROPFIND Depth:1 with symlinks present (207)" "207" "$(echo "$LIST" | tail -n 1)"
+assert_contains "listing shows regular file" "real.txt" "$LIST"
+if [[ "$LIST" == *"inlink.txt"* || "$LIST" == *"link.txt"* ]]; then
+    echo -e "  ${RED}[FAIL] listing must not expose symlinks${NC}"
+    FAILED_COUNT=$((FAILED_COUNT + 1))
+else
+    echo -e "  [PASS] listing hides symlinks"
+    PASSED_COUNT=$((PASSED_COUNT + 1))
+fi
+assert_status "GET in-tree symlink is hidden (404)" "404" "$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "$BASE_URL/public/inlink.txt")"
+assert_status "GET escaping symlink is hidden (404)" "404" "$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "$BASE_URL/public/link.txt")"
+assert_status "PROPFIND on escaping symlink is hidden (404)" "404" "$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" -X PROPFIND -H "Depth: 0" "$BASE_URL/public/link.txt")"
+
+echo -e "\n${YELLOW}--- 6. TLS listener (handover / restart loop) ---${NC}"
+
+CURL_TLS=(curl -s --max-time 5 --cacert "$TLS_CERT")
+echo "tls-body" > "${PUBLIC_DIR}/tls.txt"
+
+# Sequential requests, each on a fresh TLS connection.
+TLS_OK=0
+for i in $(seq 1 20); do
+    BODY=$("${CURL_TLS[@]}" "$TLS_URL/public/tls.txt" || true)
+    [ "$BODY" = "tls-body" ] && TLS_OK=$((TLS_OK + 1))
+done
+assert_status "20 sequential HTTPS requests succeed" "20" "$TLS_OK"
+
+# Concurrent requests share the same listening socket.
+PAR_DIR="${TEST_DIR}/par"; mkdir -p "$PAR_DIR"
+for i in $(seq 1 20); do
+    ("${CURL_TLS[@]}" -o "$PAR_DIR/$i" "$TLS_URL/public/tls.txt" || true) &
+done
+wait $(jobs -p | grep -v "^$SERVER_PID$") 2>/dev/null || true
+assert_status "20 concurrent HTTPS requests succeed" "20" "$(grep -l '^tls-body$' "$PAR_DIR"/* 2>/dev/null | wc -l | tr -d ' ')"
+
+# Bad handshakes (plain HTTP to the TLS port, and a client that disconnects) must not
+# take the listener down.
+curl -s --max-time 3 -o /dev/null "http://localhost:${TLS_PORT}/" || true
+curl -s --max-time 3 --http1.1 --tlsv1.0 --tls-max 1.0 -k -o /dev/null "$TLS_URL/" || true
+assert_contains "HTTPS still works after failed handshakes" "tls-body" "$("${CURL_TLS[@]}" "$TLS_URL/public/tls.txt" || true)"
+assert_status "server process still alive" "alive" "$(kill -0 "$SERVER_PID" 2>/dev/null && echo alive || echo dead)"
 
 echo -e "\n${BLUE}====================================================${NC}"
 echo -e "${BLUE}  WebDAV End-to-End Test Summary                   ${NC}"
