@@ -27,7 +27,6 @@ mod userfs;
 
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::process::exit;
 use std::sync::Arc;
 
@@ -536,22 +535,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // we run it in a loop. Every time the loop is entered we dup() the
                 // listening fd and create a new TcpListener. This way, we should
                 // not lose any pending connections during a restart.
-                let master_listen_fd = listener.as_raw_fd();
-                std::mem::forget(listener);
+                let master_listener = listener.into_std().unwrap_or_else(|e| {
+                    eprintln!("{}: into_std on {:?}: {}", PROGNAME, sockaddr, e);
+                    exit(1);
+                });
+                let master_listen_fd: std::os::fd::OwnedFd = master_listener.into();
 
                 println!("Listening on https://{:?}", sockaddr);
                 tls_servers.push(async move {
                     loop {
                         // reuse the incoming socket after the server exits.
-                        let listen_fd = match nix::unistd::dup(master_listen_fd) {
+                        let listen_fd = match nix::unistd::dup(&master_listen_fd) {
                             Ok(fd) => fd,
                             Err(e) => {
                                 eprintln!("{}: server error: dup: {}", PROGNAME, e);
                                 break;
                             },
                         };
-                        // SAFETY: listen_fd is unique (we just dup'ed it).
-                        let std_listen = unsafe { std::net::TcpListener::from_raw_fd(listen_fd) };
+                        let std_listen = std::net::TcpListener::from(listen_fd);
                         let listener = match tokio::net::TcpListener::from_std(std_listen) {
                             Ok(l) => l,
                             Err(e) => {
@@ -679,7 +680,7 @@ fn make_listener(srv: &config::Server, addr: SocketAddr) -> io::Result<tokio::ne
         s.set_only_v6(true)?;
     }
     s.set_nonblocking(true)?;
-    s.set_nodelay(true)?;
+    s.set_tcp_nodelay(true)?;
     s.set_reuse_address(true)?;
     let addr: SockAddr = addr.into();
     s.bind(&addr)?;
