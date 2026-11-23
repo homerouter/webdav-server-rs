@@ -293,4 +293,29 @@ mod tests {
         assert!(!debug.contains("top-secret"));
         assert!(debug.contains("<redacted>"));
     }
+
+    // The wire format is bincode 2 `standard()` (varint); guard against format drift.
+    #[test]
+    fn wire_roundtrip() {
+        let cfg = bincode::config::standard();
+        let req = PamRequest {
+            id: u64::MAX,
+            user: "alice".into(),
+            pass: "pw".into(),
+            service: "webdav".into(),
+            remip: Some("::1".into()),
+        };
+        let buf = bincode::serde::encode_to_vec(&req, cfg).unwrap();
+        let (back, n): (PamRequest, usize) = bincode::serde::decode_from_slice(&buf, cfg).unwrap();
+        assert_eq!(n, buf.len());
+        assert_eq!((back.id, back.user, back.remip), (req.id, req.user, req.remip));
+
+        for result in [Ok(()), Err(PamError::unknown())] {
+            let res = PamResponse { id: 7, result };
+            let buf = bincode::serde::encode_to_vec(&res, cfg).unwrap();
+            let (back, _): (PamResponse, usize) = bincode::serde::decode_from_slice(&buf, cfg).unwrap();
+            assert_eq!(back.id, 7);
+            assert_eq!(back.result.is_ok(), res.result.is_ok());
+        }
+    }
 }

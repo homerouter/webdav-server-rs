@@ -41,6 +41,10 @@ echo -e "${BLUE}====================================================${NC}"
 
 # 1. Setup PAM service configuration for webdav
 mkdir -p /etc/pam.d
+# Only remove what this run created, so a real config/user survives cleanup.
+CREATED_PAM_CFG=0
+CREATED_USER=0
+if [ ! -e /etc/pam.d/webdav ]; then CREATED_PAM_CFG=1; fi
 cat << 'EOF' > /etc/pam.d/webdav
 #%PAM-1.0
 auth    required pam_unix.so
@@ -50,6 +54,7 @@ EOF
 # 2. Setup Unix user in system
 if ! id "$TEST_USER" >/dev/null 2>&1; then
     adduser -D -h "/home/$TEST_USER" -s /bin/sh "$TEST_USER"
+    CREATED_USER=1
 fi
 echo "$TEST_USER:$TEST_PASS" | chpasswd
 USER_HOME=$(getent passwd "$TEST_USER" | cut -d: -f6)
@@ -93,8 +98,10 @@ cleanup() {
     fi
     rm -rf "$TEST_DIR"
     rm -f "${USER_HOME}/pam_sample.txt"
-    if [ "$(id -u)" -eq 0 ]; then
+    if [ "$CREATED_USER" -eq 1 ]; then
         deluser --remove-home "$TEST_USER" 2>/dev/null || userdel -r "$TEST_USER" 2>/dev/null || true
+    fi
+    if [ "$CREATED_PAM_CFG" -eq 1 ]; then
         rm -f /etc/pam.d/webdav
     fi
 }
