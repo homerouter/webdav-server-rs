@@ -41,7 +41,7 @@ cargo build --release --no-default-features --features=quota
 
 ## Configuration.
 
-See the [example webdav-server.toml file](webdav-server.toml)
+See the [example webdavd.toml file](webdavd.toml)
 
 There is also an [example nginx proxy](examples/nginx-proxy.conf) configuration.
 

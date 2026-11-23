@@ -1,5 +1,5 @@
-#![doc(html_root_url = "https://docs.rs/webdav-server/0.4.4")]
-//! # `webdav-server` is a webdav server that handles user-accounts.
+#![doc(html_root_url = "https://docs.rs/webdavd/0.4.5")]
+//! # `webdavd` is a webdav server that handles user-accounts.
 //!
 //! This is a webdav server that allows access to a users home directory,
 //! just like an ancient FTP server would (remember those?).
@@ -49,13 +49,13 @@ use crate::suid::proc_switch_ugid;
 use crate::tls::tls_acceptor;
 use crate::userfs::UserFs;
 
-static PROGNAME: &str = "webdav-server";
+static PROGNAME: &str = "webdavd";
 
 #[derive(Parser, Debug)]
-#[command(name = "webdav-server", version)]
+#[command(name = "webdavd", version)]
 struct Cli {
-    /// configuration file (/etc/webdav-server.toml)
-    #[arg(short = 'c', long = "config", default_value = "/etc/webdav-server.toml")]
+    /// configuration file (/etc/webdavd.toml)
+    #[arg(short = 'c', long = "config", default_value = "/etc/webdavd.toml")]
     config: String,
 
     /// listen to this port on localhost only
@@ -143,14 +143,14 @@ impl Server {
         builder
     }
 
-    // Set Server: webdav-server-rs header, and CORS.
+    // Set Server: webdavd-rs header, and CORS.
     fn set_headers(&self, headers: &mut http::HeaderMap<http::header::HeaderValue>) {
         let id = self
             .config
             .server
             .identification
             .as_deref()
-            .unwrap_or("webdav-server-rs");
+            .unwrap_or("webdavd-rs");
         if !id.is_empty() {
             headers.insert("server", id.parse().unwrap());
         }
@@ -396,7 +396,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if cli.debug {
         use env_logger::Env;
-        let level = "webdav_server=debug,dav_server=debug";
+        let level = "webdavd=debug,dav_server=debug";
         env_logger::Builder::from_env(Env::default().default_filter_or(level)).init();
     } else {
         env_logger::init();

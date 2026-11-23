@@ -66,10 +66,10 @@ jobs:
       - name: Build standalone glibc tarball
         run: |
           VERSION="${{ steps.versioning.outputs.version }}"
-          PKG_NAME="webdav-server-v${VERSION}-linux-x86_64-gnu"
+          PKG_NAME="webdavd-v${VERSION}-linux-x86_64-gnu"
           mkdir -p "dist-pkg/${PKG_NAME}"
-          cp target/release/webdav-server "dist-pkg/${PKG_NAME}/"
-          cp webdav-server.toml "dist-pkg/${PKG_NAME}/"
+          cp target/release/webdavd "dist-pkg/${PKG_NAME}/"
+          cp webdavd.toml "dist-pkg/${PKG_NAME}/"
           cp README.md "dist-pkg/${PKG_NAME}/"
           tar -czf "dist/${PKG_NAME}.tar.gz" -C dist-pkg "${PKG_NAME}"
 
@@ -131,15 +131,15 @@ jobs:
       - name: Test binary with Alpine PAM E2E
         run: |
           chmod +x tests/e2e_pam_alpine.sh
-          bash tests/e2e_pam_alpine.sh target/release/webdav-server
+          bash tests/e2e_pam_alpine.sh target/release/webdavd
 
       - name: Package Alpine musl tarball
         run: |
           VERSION="${{ steps.versioning.outputs.version }}"
-          PKG_NAME="webdav-server-v${VERSION}-linux-x86_64-musl"
+          PKG_NAME="webdavd-v${VERSION}-linux-x86_64-musl"
           mkdir -p "dist/${PKG_NAME}"
-          cp target/release/webdav-server "dist/${PKG_NAME}/"
-          cp webdav-server.toml "dist/${PKG_NAME}/"
+          cp target/release/webdavd "dist/${PKG_NAME}/"
+          cp webdavd.toml "dist/${PKG_NAME}/"
           cp README.md "dist/${PKG_NAME}/"
           mkdir -p dist-out
           tar -czf "dist-out/${PKG_NAME}.tar.gz" -C dist "${PKG_NAME}"

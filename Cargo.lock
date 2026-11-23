@@ -1941,8 +1941,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "webdav-server"
-version = "0.4.4"
+name = "webdavd"
+version = "0.4.5"
 dependencies = [
  "bytes",
  "clap",
