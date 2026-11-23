@@ -40,6 +40,11 @@ jobs:
       - name: Run tests
         run: cargo test --all-targets --all-features --verbose
 
+      - name: PAM conversation unit test (C)
+        run: |
+          cc -Wall -Wextra -I pam/src tests/pam_memzero.c -lpam -o "$RUNNER_TEMP/pam_memzero"
+          "$RUNNER_TEMP/pam_memzero"
+
       - name: Run WebDAV End-to-End Tests (Debug)
         run: |
           chmod +x tests/e2e_webdav.sh
@@ -66,6 +71,7 @@ jobs:
             git \
             linux-pam \
             linux-pam-dev \
+            openssl \
             libtirpc-dev \
             rpcsvc-proto
           git config --global --add safe.directory '*'
@@ -88,6 +94,11 @@ jobs:
 
       - name: Run tests
         run: cargo test --all-targets --all-features --verbose
+
+      - name: PAM conversation unit test (C)
+        run: |
+          cc -Wall -Wextra -I pam/src tests/pam_memzero.c -lpam -o "$RUNNER_TEMP/pam_memzero"
+          "$RUNNER_TEMP/pam_memzero"
 
       - name: Run WebDAV End-to-End Tests (Debug)
         run: |
