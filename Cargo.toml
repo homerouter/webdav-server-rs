@@ -79,5 +79,5 @@ socket2 = { version = "0.6", features = ["all"] }
 tls-listener = { version = "0.11", features = ["rustls"] }
 tokio = { version = "1.40", features = ["full"] }
 tokio-rustls = "0.26"
-toml = "0.8"
+toml = "1.2"
 url = "2.5"
