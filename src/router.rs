@@ -227,16 +227,20 @@ mod tests {
         assert!(!x.is_empty());
         let x = &x[0];
         if !user.is_empty() {
-            assert!(x.params[0]
-                .as_ref()
-                .map(|b| b.as_bytes() == user.as_bytes())
-                .unwrap_or(false));
+            assert!(
+                x.params[0]
+                    .as_ref()
+                    .map(|b| b.as_bytes() == user.as_bytes())
+                    .unwrap_or(false)
+            );
         }
         if !path.is_empty() {
-            assert!(x.params[1]
-                .as_ref()
-                .map(|b| b.as_bytes() == path.as_bytes())
-                .unwrap_or(false));
+            assert!(
+                x.params[1]
+                    .as_ref()
+                    .map(|b| b.as_bytes() == path.as_bytes())
+                    .unwrap_or(false)
+            );
         }
     }
 

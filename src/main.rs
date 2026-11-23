@@ -31,12 +31,12 @@ use std::process::exit;
 use std::sync::Arc;
 
 use clap::Parser;
-use dav_server::{davpath::DavPath, DavConfig, DavHandler, DavMethod, DavMethodSet};
+use dav_server::{DavConfig, DavHandler, DavMethod, DavMethodSet, davpath::DavPath};
 use dav_server::{fakels::FakeLs, fs::GuardedFileSystem, ls::DavLockSystem};
 use futures_util::stream::StreamExt;
-use headers::{authorization::Basic, Authorization, HeaderMapExt};
+use headers::{Authorization, HeaderMapExt, authorization::Basic};
 use http::status::StatusCode;
-use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Empty, StreamBody};
+use http_body_util::{BodyExt, Empty, StreamBody, combinators::UnsyncBoxBody};
 use hyper::body::{Body as _, Frame, Incoming};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
@@ -128,10 +128,11 @@ impl Server {
 
         // check minimum uid
         if let Some(min_uid) = self.config.unix.min_uid
-            && pwd.uid < min_uid {
-                debug!("acct: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
-                return Err(StatusCode::FORBIDDEN);
-            }
+            && pwd.uid < min_uid
+        {
+            debug!("acct: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
+            return Err(StatusCode::FORBIDDEN);
+        }
         Ok(Some(pwd))
     }
 

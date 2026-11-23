@@ -265,10 +265,11 @@ pub fn build_routes(cfg: &str, config: &mut Config) -> io::Result<()> {
 pub fn check(cfg: &str, config: &Config) {
     #[cfg(feature = "pam")]
     if let Some(AuthType::Pam) = config.accounts.auth_type
-        && config.pam.service.is_empty() {
-            eprintln!("{}: missing section [pam]", cfg);
-            exit(1);
-        }
+        && config.pam.service.is_empty()
+    {
+        eprintln!("{}: missing section [pam]", cfg);
+        exit(1);
+    }
 
     if config.server.listen.is_empty() && config.server.tls_listen.is_empty() {
         eprintln!(

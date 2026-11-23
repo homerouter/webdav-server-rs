@@ -11,6 +11,8 @@ fn main() {
         cc::Build::new().file("src/pam.c").compile("rpam");
         println!("cargo:rustc-cfg=has_pam_c");
     } else {
-        println!("cargo:warning=security/pam_appl.h not found, pam-sandboxed will be built without native PAM linkage");
+        println!(
+            "cargo:warning=security/pam_appl.h not found, pam-sandboxed will be built without native PAM linkage"
+        );
     }
 }

@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // for that is a dynamic test-mode setting in the library, instead of compile-time.
 #[cfg(test)]
 mod tests {
-    use pam_sandboxed::{test_mode, PamAuth, PamError};
+    use pam_sandboxed::{PamAuth, PamError, test_mode};
 
     const TEST_STR: &str = "xyzzy-test-test";
 

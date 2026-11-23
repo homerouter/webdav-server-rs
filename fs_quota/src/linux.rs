@@ -4,8 +4,8 @@
 use std::ffi::CString;
 use std::fs::File;
 use std::io;
-use std::io::prelude::*;
 use std::io::BufReader;
+use std::io::prelude::*;
 use std::os::raw::{c_char, c_int};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;

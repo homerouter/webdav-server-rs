@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 
-use crate::pam::{pam_auth, pam_lower_rlimits, PamError};
+use crate::pam::{PamError, pam_auth, pam_lower_rlimits};
 use crate::pamclient::PamRequest;
 
 // Response back from the server process.

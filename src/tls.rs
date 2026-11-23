@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use rustls_pemfile as pemfile;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
-use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
+use tokio_rustls::rustls::ServerConfig;
 
 use crate::config::Server;
 

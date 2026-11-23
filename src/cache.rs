@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::cmp::Eq;
-use std::collections::vec_deque::VecDeque;
 use std::collections::HashMap;
+use std::collections::vec_deque::VecDeque;
 use std::hash::Hash;
 use std::option::Option;
 use std::sync::{Arc, Mutex};
@@ -171,9 +171,10 @@ pub(crate) mod cached {
         let key = s.finish();
 
         if let Some(cache_user) = get_pamcache().get(&key)
-            && user == cache_user.as_str() {
-                return Ok(());
-            }
+            && user == cache_user.as_str()
+        {
+            return Ok(());
+        }
 
         let mut pam_auth = pam_auth;
         match pam_auth.auth(service, user, pass, remip).await {

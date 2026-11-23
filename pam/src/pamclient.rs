@@ -13,14 +13,14 @@ use futures::join;
 use futures::{sink::SinkExt, stream::StreamExt};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
 use tokio::net::unix::ReadHalf as UnixReadHalf;
 use tokio::net::unix::WriteHalf as UnixWriteHalf;
-use tokio::net::UnixStream;
 
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 
-use crate::pam::{PamError, ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER};
+use crate::pam::{ERR_RECV_FROM_SERVER, ERR_SEND_TO_SERVER, PamError};
 use crate::pamserver::{PamResponse, PamServer};
 
 // Request to be sent to the server process.
