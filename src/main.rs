@@ -127,12 +127,11 @@ impl Server {
         };
 
         // check minimum uid
-        if let Some(min_uid) = self.config.unix.min_uid {
-            if pwd.uid < min_uid {
+        if let Some(min_uid) = self.config.unix.min_uid
+            && pwd.uid < min_uid {
                 debug!("acct: {}: uid {} too low (<{})", pwd.name, pwd.uid, min_uid);
                 return Err(StatusCode::FORBIDDEN);
             }
-        }
         Ok(Some(pwd))
     }
 

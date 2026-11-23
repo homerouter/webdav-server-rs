@@ -4,7 +4,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(has_pam_c)]
-extern "C" {
+unsafe extern "C" {
     fn c_pam_auth(
         service: *const c_char,
         user: *const c_char,

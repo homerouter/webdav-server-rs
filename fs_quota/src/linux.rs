@@ -13,7 +13,7 @@ use std::path::Path;
 use crate::{FqError, FsQuota, Mtab};
 
 // The actual implementation is done in C, and imported here.
-extern "C" {
+unsafe extern "C" {
     fn fs_quota_linux(
         device: *const c_char,
         id: c_int,

@@ -142,11 +142,10 @@ impl Auth {
             // Check each line for a match.
             for line in lines {
                 let mut fields = line.split(':');
-                if let (Some(htuser), Some(htpass)) = (fields.next(), fields.next()) {
-                    if htuser == user && pwhash::unix::verify(&pass, htpass) {
+                if let (Some(htuser), Some(htpass)) = (fields.next(), fields.next())
+                    && htuser == user && pwhash::unix::verify(&pass, htpass) {
                         return Ok(user);
                     }
-                }
             }
 
             debug!("auth_htpasswd: authentication for {} failed", user);

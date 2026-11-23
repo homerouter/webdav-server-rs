@@ -22,12 +22,12 @@ fn run_rpcgen() -> bool {
         );
     }
 
-    if let Ok(res_h) = Command::new("rpcgen").arg("-h").arg("src/rquota.x").output() {
-        if res_h.status.success() {
-            let hdr = String::from_utf8_lossy(&res_h.stdout);
-            if let Ok(mut f) = File::create("src/rquota.h") {
-                let _ = f.write_all(hdr.as_bytes());
-            }
+    if let Ok(res_h) = Command::new("rpcgen").arg("-h").arg("src/rquota.x").output()
+        && res_h.status.success()
+    {
+        let hdr = String::from_utf8_lossy(&res_h.stdout);
+        if let Ok(mut f) = File::create("src/rquota.h") {
+            let _ = f.write_all(hdr.as_bytes());
         }
     }
     true

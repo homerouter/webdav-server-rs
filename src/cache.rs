@@ -170,11 +170,10 @@ pub(crate) mod cached {
         remip.as_ref().hash(&mut s);
         let key = s.finish();
 
-        if let Some(cache_user) = get_pamcache().get(&key) {
-            if user == cache_user.as_str() {
+        if let Some(cache_user) = get_pamcache().get(&key)
+            && user == cache_user.as_str() {
                 return Ok(());
             }
-        }
 
         let mut pam_auth = pam_auth;
         match pam_auth.auth(service, user, pass, remip).await {

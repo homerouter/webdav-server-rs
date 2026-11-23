@@ -22,13 +22,13 @@ unsafe fn cptr_to_osstr<'a>(c: *const libc::c_char) -> &'a OsStr {
     if c.is_null() {
         OsStr::from_bytes(b"")
     } else {
-        let bytes = CStr::from_ptr(c).to_bytes();
+        let bytes = unsafe { CStr::from_ptr(c) }.to_bytes();
         OsStr::from_bytes(bytes)
     }
 }
 
 unsafe fn cptr_to_path<'a>(c: *const libc::c_char) -> &'a Path {
-    Path::new(cptr_to_osstr(c))
+    Path::new(unsafe { cptr_to_osstr(c) })
 }
 
 unsafe fn to_user(pwd: &libc::passwd) -> User {
@@ -36,20 +36,20 @@ unsafe fn to_user(pwd: &libc::passwd) -> User {
     let cs_name = if pwd.pw_name.is_null() {
         ""
     } else {
-        CStr::from_ptr(pwd.pw_name).to_str().unwrap_or("")
+        unsafe { CStr::from_ptr(pwd.pw_name) }.to_str().unwrap_or("")
     };
     let cs_passwd = if pwd.pw_passwd.is_null() {
         ""
     } else {
-        CStr::from_ptr(pwd.pw_passwd).to_str().unwrap_or("")
+        unsafe { CStr::from_ptr(pwd.pw_passwd) }.to_str().unwrap_or("")
     };
     let cs_gecos = if pwd.pw_gecos.is_null() {
         ""
     } else {
-        CStr::from_ptr(pwd.pw_gecos).to_str().unwrap_or("")
+        unsafe { CStr::from_ptr(pwd.pw_gecos) }.to_str().unwrap_or("")
     };
-    let cs_dir = cptr_to_path(pwd.pw_dir);
-    let cs_shell = cptr_to_path(pwd.pw_shell);
+    let cs_dir = unsafe { cptr_to_path(pwd.pw_dir) };
+    let cs_shell = unsafe { cptr_to_path(pwd.pw_shell) };
 
     // then turn the slices into safe owned values.
     User {
